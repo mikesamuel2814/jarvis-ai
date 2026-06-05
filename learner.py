@@ -19,22 +19,29 @@ from pathlib import Path
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 sys.path.insert(0, str(JARVIS_HOME))
 
-# Lazy import: indexer drags in chromadb which segfaults in --stats mode
-if "--stats" not in sys.argv:
-    from indexer import load_config, log
-else:
-    import yaml as _yaml
+# Never import from indexer — it has top-level chromadb import which segfaults here
+import yaml as _yaml
 
-    def load_config() -> dict:
-        cfg = JARVIS_HOME / "config" / "jarvis.yaml"
-        return _yaml.safe_load(cfg.read_text()) if cfg.exists() else {}
+TRAINING_LOG_FOR_LOG = JARVIS_HOME / "logs" / "training.log"
 
-    def log(msg: str) -> None:
+
+def load_config() -> dict:
+    cfg = JARVIS_HOME / "config" / "jarvis.yaml"
+    return _yaml.safe_load(cfg.read_text()) if cfg.exists() else {}
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+    try:
+        TRAINING_LOG_FOR_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(TRAINING_LOG_FOR_LOG, "a") as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except Exception:
         pass
 
 INTERACTIONS_LOG = JARVIS_HOME / "data" / "interactions.jsonl"
 DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
-TRAINING_LOG     = JARVIS_HOME / "logs" / "training.log"
+TRAINING_LOG     = TRAINING_LOG_FOR_LOG
 
 _STRIP_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
