@@ -480,7 +480,8 @@ def query(req: QueryRequest):
     model = route_model(req.query, req.model)
     context = retrieve_context(req.query, n=req.context_results)
     history = [{"role": m.role, "content": m.content} for m in req.history] if req.history else None
-    messages = build_messages(req.query, context, history)
+    unknown_term = _contains_unknown_proper_noun(req.query)
+    messages = build_messages(req.query, context, history, unknown_term=unknown_term)
 
     # Tune temperature by query type — keep low to reduce hallucination
     temp = 0.3
