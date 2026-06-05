@@ -20,6 +20,9 @@ from typing import List, Optional
 # initializes — single-threaded import is ~4x less likely to trip the
 # intermittent chromadb C-extension import segfault on Python 3.13 / RTX 3050.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
+# RAM allocator tuning — 4 arenas reduce lock contention on 64GB / 32-thread machine
+os.environ.setdefault("MALLOC_ARENA_MAX", "4")
+os.environ.setdefault("PYTHONMALLOC", "malloc")
 
 # chromadb imported lazily inside get_collection() — a top-level import flaps
 # the service on startup (segfaults ~25% of runs, see learner.py / indexer.py).
