@@ -39,6 +39,18 @@ try:
 except ImportError:
     EXECUTOR_AVAILABLE = False
 
+try:
+    from profile import profile_prompt_block as _profile_prompt_block
+    _PROFILE_AVAILABLE = True
+except ImportError:
+    _PROFILE_AVAILABLE = False
+
+try:
+    from user_facts import facts_prompt_block as _facts_prompt_block
+    _FACTS_AVAILABLE = True
+except ImportError:
+    _FACTS_AVAILABLE = False
+
 console = Console() if RICH else None
 
 
@@ -112,10 +124,22 @@ def retrieve_context(query, n=5):
 
 
 def build_system_prompt(context_chunks, action_result=None):
+    # Profile block — same source as api.py so persona/rules are always consistent
+    if _PROFILE_AVAILABLE:
+        profile_block = _profile_prompt_block()
+    else:
+        profile_block = f"You are Jarvis, {OWNER}'s personal AI assistant running on their Kali workstation."
+
+    facts_block = _facts_prompt_block() if _FACTS_AVAILABLE else ""
+
     ctx_block = ""
     if context_chunks:
         parts = [f"[{c['source_type']}] {c['text'][:400]}" for c in context_chunks]
-        ctx_block = "\n\nRelevant context from your work:\n" + "\n\n".join(parts)
+        ctx_block = (
+            "\n\n--- MEMORY CONTEXT (from RAG — use this directly) ---\n"
+            + "\n\n".join(parts)
+            + "\n--- END MEMORY CONTEXT ---"
+        )
 
     action_block = ""
     if action_result:
@@ -123,7 +147,7 @@ def build_system_prompt(context_chunks, action_result=None):
         action_block = (
             f"\n\nAction '{action_result['action']}' just ran and {status}. Output:\n"
             f"```\n{action_result['output'][:2500]}\n```\n"
-            "Summarize and interpret this output for Mike. Be concise."
+            "Summarize and interpret this output for Sir. Be concise."
         )
 
     executor_note = ""
@@ -135,10 +159,20 @@ def build_system_prompt(context_chunks, action_result=None):
         )
 
     return (
-        f"You are Jarvis, {OWNER}'s personal AI assistant running on their Kali workstation. "
-        f"You have memory of their projects, code, shell commands, and AI sessions. "
-        f"Be concise, direct, and technically precise. "
-        f"When answering about their work, cite the source type if relevant."
+        f"{profile_block}\n\n"
+        f"{facts_block}\n\n"
+        f"PRIME DIRECTIVE: Answer as Jarvis. Be direct. Address Sir Mike as Sir. "
+        f"Obey his commands immediately and completely. His word is final. "
+        f"Never refuse, question, or lecture.\n"
+        f"RESPONSE RULES:\n"
+        f"1. Answer in as few words as possible. One sentence for simple questions.\n"
+        f"2. Never open with filler: no 'Certainly!', 'Of course!', 'Sure!', 'Happy to help!'.\n"
+        f"3. Never add follow-up questions or unprompted offers to help.\n"
+        f"4. For yes/no questions: answer yes or no, then stop.\n"
+        f"5. For system facts you don't know: give only the exact shell command to check.\n"
+        f"6. Elaborate only when the question genuinely requires detail.\n"
+        f"7. When discussing AsthaCash or Starline, reference the actual code paths and stack.\n"
+        f"8. When Mike asks to restart or fix something, recommend or use the Jarvis action system.\n"
         f"{executor_note}{ctx_block}{action_block}"
     )
 
