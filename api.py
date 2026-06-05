@@ -479,6 +479,7 @@ class QueryResponse(BaseModel):
     context_used: Optional[int] = 0
     timestamp: str
     interaction_id: Optional[str] = None
+    cached: Optional[bool] = False
 
 
 class IndexRequest(BaseModel):
