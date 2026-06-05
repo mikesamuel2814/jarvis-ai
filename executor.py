@@ -65,7 +65,7 @@ ACTIONS: dict[str, dict] = {
     "pm2_logs_gateway":  {"desc": "AsthaCash gateway backend logs",        "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs gateway-backend --lines 20 --nostream 2>&1'",                       "tier": AUTO},
     "pm2_logs_starline": {"desc": "Starline API server logs",              "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs api-server --lines 20 --nostream 2>&1'",                            "tier": AUTO},
     "git_status_all":    {"desc": "Git status across all projects",        "cmd": r"find /home/kali/Projects -name '.git' -maxdepth 3 -exec sh -c 'echo \"=== $(dirname {}) ===\"; git -C $(dirname {}) status --short' \;", "tier": AUTO},
-    "nginx_status":      {"desc": "VPS Nginx status and config test",      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl is-active nginx && nginx -t 2>&1'",                                "tier": AUTO},
+    "nginx_status":      {"desc": "VPS Nginx status",                      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl status nginx --no-pager -l | head -20'",                   "tier": AUTO},
     "jarvis_logs_tail":  {"desc": "Jarvis API latest logs",                "cmd": "tail -50 /home/kali/.jarvis/logs/jarvis.log",                                                                                      "tier": AUTO},
 
     # ── VPS project restarts (confirm) ───────────────────────────────────────

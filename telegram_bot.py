@@ -561,11 +561,116 @@ def _fmt_gpu(raw: str) -> str:
     return "\n".join(out[:12]) if out else raw
 
 
+def _fmt_network(raw: str) -> str:
+    lines, ifaces = raw.splitlines(), []
+    cur = None
+    for line in lines:
+        m = re.match(r'^\d+: (\S+):', line)
+        if m:
+            cur = {"name": m.group(1).rstrip("@:"), "ips": [], "state": "UP" if "UP" in line else "DOWN"}
+        elif cur and "inet " in line:
+            ip = re.search(r'inet (\S+)', line)
+            if ip:
+                cur["ips"].append(ip.group(1).split("/")[0])
+                ifaces.append(cur)
+                cur = None
+    if not ifaces:
+        return raw
+    lines_out = ["*Network*"]
+    for i in ifaces:
+        icon = "✅" if i["state"] == "UP" else "❌"
+        lines_out.append(f"  {icon} `{i['name']}` — " + "  ".join(f"`{ip}`" for ip in i["ips"]))
+    return "\n".join(lines_out)
+
+
+def _fmt_ps_top(raw: str, title: str) -> str:
+    rows = []
+    for line in raw.strip().splitlines():
+        parts = line.split(None, 10)
+        if len(parts) >= 11:
+            cpu, mem, cmd = parts[2], parts[3], parts[10][:35]
+            rows.append(f"`{cpu:>5}%cpu` `{mem:>4}%mem`  {cmd}")
+    if not rows:
+        return raw
+    return f"*{title}*\n" + "\n".join(rows[:5])
+
+
+def _fmt_disk(raw: str) -> str:
+    lines_out = ["*Disk Usage*"]
+    for line in raw.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        fs, size, used, avail, pct, mount = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+        # skip tmpfs/virtual mounts
+        if fs in ("tmpfs", "devtmpfs", "udev") or mount.startswith("/run") or mount.startswith("/dev/shm"):
+            continue
+        try:
+            pct_n = int(pct.rstrip("%"))
+            bar = _bar(pct_n, 8)
+        except Exception:
+            bar = ""
+        lines_out.append(f"  `{mount}` {bar} `{used}/{size}` ({pct})")
+    return "\n".join(lines_out) if len(lines_out) > 1 else raw
+
+
+def _fmt_memory(raw: str) -> str:
+    for line in raw.splitlines():
+        if line.startswith("Mem:"):
+            parts = line.split()
+            try:
+                total, used, free = parts[1], parts[2], parts[3]
+                pct = round(float(used.rstrip("Gi").rstrip("Mi")) / float(total.rstrip("Gi").rstrip("Mi")) * 100)
+                return (f"*RAM*\n"
+                        f"  Used:  `{used} / {total}` {_bar(pct)} `{pct}%`\n"
+                        f"  Free:  `{free}`")
+            except Exception:
+                pass
+    return raw
+
+
+def _fmt_ollama_models(raw: str) -> str:
+    lines_out = ["*AI Models*"]
+    for line in raw.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 3:
+            name, size = parts[0], parts[2] + " " + parts[3] if len(parts) > 3 else parts[2]
+            lines_out.append(f"  `{name}` — {size}")
+    return "\n".join(lines_out) if len(lines_out) > 1 else raw
+
+
+def _fmt_tailscale(raw: str) -> str:
+    lines_out = ["*Tailscale*"]
+    for line in raw.strip().splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and re.match(r'^\d+\.\d+', parts[0]):
+            ip, host = parts[0], parts[1]
+            status = "❌" if "offline" in line else "✅"
+            lines_out.append(f"  {status} `{ip}` — {host}")
+    return "\n".join(lines_out) if len(lines_out) > 1 else raw
+
+
 def _format_action_output(action: str, output: str) -> str:
     if action == "services":
         return _fmt_services(output)
     if action == "gpu":
         return f"*GPU*\n```\n{_fmt_gpu(output)}\n```"
+    if action == "network":
+        return _fmt_network(output)
+    if action == "top5_cpu":
+        return _fmt_ps_top(output, "Top CPU Processes")
+    if action == "top5_mem":
+        return _fmt_ps_top(output, "Top Memory Processes")
+    if action == "disk":
+        return _fmt_disk(output)
+    if action == "memory":
+        return _fmt_memory(output)
+    if action == "ollama_models":
+        return _fmt_ollama_models(output)
+    if action == "tailscale":
+        return _fmt_tailscale(output)
     return f"```\n{output[:3000]}\n```"
 
 
