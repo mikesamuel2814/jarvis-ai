@@ -52,17 +52,20 @@ app.add_middleware(
 _ollama_lock = threading.Semaphore(1)
 
 
-def _ollama_chat(model: str, messages: list, options: dict, retries: int = 2) -> dict:
-    """Thread-safe Ollama chat with retry on transient errors."""
+def _ollama_chat(model: str, messages: list, options: dict, retries: int = 3) -> dict:
+    """Thread-safe Ollama chat with retry on transient errors.
+
+    deepseek-r1:7b on 6GB VRAM intermittently crashes llama-server on load
+    ("error loading model vocabulary" / "llama-server process has terminated").
+    These surface as ResponseError but recover on retry once the server respawns,
+    so we retry ResponseError too — with a delay long enough for the respawn.
+    """
     last_err = None
     for attempt in range(retries + 1):
         with _ollama_lock:
             try:
                 return ollama.chat(model=model, messages=messages, options=options)
-            except ollama.ResponseError as e:
-                last_err = e
-                break  # ResponseError = model truly unavailable, don't retry
-            except Exception as e:
+            except (ollama.ResponseError, Exception) as e:
                 last_err = e
                 if attempt < retries:
                     time.sleep(3)

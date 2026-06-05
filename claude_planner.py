@@ -38,6 +38,22 @@ def _strip_thinking(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _ollama_chat_retry(model: str, messages: list, options: dict, retries: int = 3):
+    """Ollama chat with retry — deepseek-r1:7b crashes llama-server intermittently
+    on 6GB VRAM; a retry after respawn recovers it."""
+    import ollama as _ollama
+    import time as _time
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            return _ollama.chat(model=model, messages=messages, options=options)
+        except Exception as e:
+            last = e
+            if attempt < retries:
+                _time.sleep(3)
+    raise last
+
+
 # ── Claude Opus 4.8 path ─────────────────────────────────────────────────────
 
 _PLAN_SYSTEM = (
@@ -190,7 +206,6 @@ Write a concise direct response for Mike based on this data.
 
 
 def _plan_with_ollama(query: str, available_actions: dict) -> dict:
-    import ollama as _ollama
     actions_list = "\n".join(
         f"  {k}: {v['desc']} (tier:{v['tier']})"
         for k, v in available_actions.items()
@@ -200,13 +215,13 @@ def _plan_with_ollama(query: str, available_actions: dict) -> dict:
         query=query.replace('"', "'"),
     )
     try:
-        resp = _ollama.chat(
+        resp = _ollama_chat_retry(
             model="deepseek-r1:7b",
             messages=[
                 {"role": "system", "content": _OLLAMA_PLAN_SYSTEM},
                 {"role": "user", "content": prompt},
             ],
-            options={"temperature": 0.1, "num_predict": 512},
+            options={"temperature": 0.1, "num_predict": 512, "num_ctx": 2048},
         )
         raw = _strip_thinking(resp["message"]["content"])
         if "```" in raw:
@@ -223,7 +238,6 @@ def _plan_with_ollama(query: str, available_actions: dict) -> dict:
 
 
 def _synthesize_with_ollama(query: str, results: list) -> str:
-    import ollama as _ollama
     if not results:
         return "No actions ran."
     parts = []
@@ -236,13 +250,13 @@ def _synthesize_with_ollama(query: str, results: list) -> str:
         results_block=results_block,
     )
     try:
-        resp = _ollama.chat(
+        resp = _ollama_chat_retry(
             model="deepseek-r1:7b",
             messages=[
                 {"role": "system", "content": _OLLAMA_SYNTH_SYSTEM},
                 {"role": "user", "content": prompt},
             ],
-            options={"temperature": 0.4, "num_predict": 1024},
+            options={"temperature": 0.4, "num_predict": 1024, "num_ctx": 2048},
         )
         text = _strip_thinking(resp["message"]["content"]).strip()
         if text:
