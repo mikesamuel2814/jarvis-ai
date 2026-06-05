@@ -410,7 +410,9 @@ HELP_TEXT = (
     "/approve ID — Approve a pending action\n"
     "/deny ID — Deny a pending action\n"
     "/actions — List available actions\n"
-    "/pending — Show pending approvals\n\n"
+    "/pending — Show pending approvals\n"
+    "/task DESC — Delegate task to Claude Code (background, results here)\n"
+    "/exec CMD — Smart dispatch: detect action or plan + execute\n\n"
     "After each response, tap 👍 or 👎 to train Jarvis.\n\n"
     "Actions (type naturally):\n"
     "  restart jarvis | restart bot | restart ollama\n"
@@ -717,6 +719,48 @@ def main():
         except Exception as e:
             await send(update, f"Error: {e}")
 
+    async def task_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Delegate a task to Claude Code (background, results via Telegram)."""
+        task = " ".join(context.args).strip() if context.args else ""
+        if not task:
+            await send(update, "Usage: /task <description>\nExample: /task fix the typo in gateway-admin index.js line 42")
+            return
+        await send(update, f"🤖 Queuing Claude Code task:\n`{task}`\n\nApproval required to run.")
+        try:
+            resp = requests.post(f"{API_BASE}/action", json={"action": "claude_task", "arg": task}, timeout=10)
+            d = resp.json()
+            req_id = d.get("request_id", "")
+            if req_id:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Run Task", callback_data=f"approve_{req_id}"),
+                    InlineKeyboardButton("❌ Cancel",   callback_data=f"deny_{req_id}"),
+                ]])
+                await update.message.reply_text(
+                    f"🔐 *Claude Task* (ID: `{req_id}`)\n_{task[:200]}_\n\nResults sent here when complete.",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown",
+                )
+            else:
+                await send(update, d.get("output", "Task queued."))
+        except Exception as e:
+            await send(update, f"Error queuing task: {e}")
+
+    async def exec_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Smart action dispatch — detect action or plan via claude-plan."""
+        query_text = " ".join(context.args).strip() if context.args else ""
+        if not query_text:
+            await send(update, "Usage: /exec <natural language command>\nExample: /exec check VPS status and restart gateway if down")
+            return
+        await update.message.chat.send_action("typing")
+        try:
+            resp = requests.post(f"{API_BASE}/claude-plan",
+                                 json={"query": query_text}, timeout=60)
+            d = resp.json()
+            reply = d.get("response", "No response.")
+            await send(update, reply)
+        except Exception as e:
+            await send(update, f"Exec error: {e}")
+
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
@@ -853,6 +897,8 @@ def main():
     app_bot.add_handler(CommandHandler("pending", pending_cmd))
     app_bot.add_handler(CommandHandler("approve", approve_cmd))
     app_bot.add_handler(CommandHandler("deny", deny_cmd))
+    app_bot.add_handler(CommandHandler("task", task_cmd))
+    app_bot.add_handler(CommandHandler("exec", exec_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

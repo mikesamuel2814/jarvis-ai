@@ -807,6 +807,85 @@ def claude_plan_query(req: QueryRequest):
     )
 
 
+@app.post("/claude-exec")
+def claude_exec(req: QueryRequest):
+    """
+    Full-loop execution: plan → run all actions → synthesize → voice notify.
+    Designed for Claude Code sessions and autonomous decision engine use.
+    """
+    from executor import ACTIONS, run_action, detect_action, extract_action_arg, AUTO, CONFIRM, APPROVE
+    from permissions import create_request
+
+    try:
+        from claude_planner import plan_actions, synthesize_results
+    except ImportError:
+        return query(req)
+
+    # Fast path: direct action detection (no LLM planning overhead)
+    direct = detect_action(req.query)
+    if direct and ACTIONS.get(direct, {}).get("tier") == AUTO:
+        result = run_action(direct, extract_action_arg(req.query, direct))
+        summary = synthesize_results(req.query, [result])
+        iid = str(uuid.uuid4())[:12]
+        log_interaction(iid, req.query, summary, "claude-exec-direct")
+        _send_voice_async(f"Action complete: {summary[:200]}")
+        return QueryResponse(response=summary, model="claude-exec",
+                             context_used=1, timestamp=datetime.now().isoformat(), interaction_id=iid)
+
+    # Full LLM planning path
+    plan = plan_actions(req.query, ACTIONS)
+    results = []
+    pending = []
+
+    if plan.get("needs_actions") and plan.get("actions"):
+        for spec in plan["actions"]:
+            name = spec.get("action", "")
+            if not name or name not in ACTIONS:
+                continue
+            entry = ACTIONS[name]
+            arg = spec.get("arg", "") or ""
+            if entry["tier"] == AUTO:
+                results.append(run_action(name, arg))
+            else:
+                pr = create_request(action=name, description=entry["desc"], tier=entry["tier"], arg=arg)
+                _send_telegram_direct(
+                    f"⚡ /claude-exec planned — ID: `{pr['id']}`\n**{entry['desc']}**\n"
+                    f"Arg: `{arg[:100]}`\nReply `/approve {pr['id']}` or `/deny {pr['id']}`"
+                )
+                pending.append(entry["desc"])
+
+    response = synthesize_results(req.query, results) if results else ""
+
+    if not results and not pending:
+        return query(req)
+
+    if pending:
+        response = (response + "\n\n⏳ Awaiting approval: " + "; ".join(pending)).strip()
+
+    iid = str(uuid.uuid4())[:12]
+    log_interaction(iid, req.query, response, "claude-exec")
+
+    if response:
+        _send_voice_async(response[:300])
+
+    return QueryResponse(response=response, model="claude-exec",
+                         context_used=len(results), timestamp=datetime.now().isoformat(), interaction_id=iid)
+
+
+def _send_voice_async(text: str):
+    """Fire-and-forget voice notification."""
+    import threading
+    _port = CONFIG.get("interfaces", {}).get("api_port", 8181)
+    def _speak():
+        try:
+            import requests as _req
+            _req.post(f"http://localhost:{_port}/voice/notify",
+                      json={"text": text}, timeout=30)
+        except Exception:
+            pass
+    threading.Thread(target=_speak, daemon=True).start()
+
+
 class FeedbackRequest(BaseModel):
     interaction_id: str
     rating: str  # "good" or "bad"
