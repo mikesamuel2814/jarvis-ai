@@ -514,6 +514,61 @@ def analyze_image_sync(img_bytes: bytes, prompt: str) -> str:
     return resp.response
 
 
+_SVC_GROUPS = {
+    "Jarvis":      {"jarvis", "jarvis-telegram", "jarvis-sync", "ollama"},
+    "Web":         {"nginx", "apache2"},
+    "Containers":  {"docker", "containerd"},
+    "Display":     {"lightdm", "gdm", "xorg"},
+}
+
+
+def _fmt_services(raw: str) -> str:
+    names = []
+    for line in raw.splitlines():
+        parts = line.split()
+        if parts and parts[0].endswith(".service") and "running" in line:
+            names.append(parts[0].replace(".service", ""))
+    if not names:
+        return raw
+
+    grouped: dict[str, list[str]] = {g: [] for g in _SVC_GROUPS}
+    grouped["System"] = []
+    for n in sorted(names):
+        safe = n.replace("_", "\\_")
+        placed = False
+        for grp, members in _SVC_GROUPS.items():
+            if n in members:
+                grouped[grp].append(safe)
+                placed = True
+                break
+        if not placed:
+            grouped["System"].append(safe)
+
+    lines = [f"*Running Services* ({len(names)})"]
+    for grp, svcs in grouped.items():
+        if svcs:
+            lines.append(f"\n*{grp}*")
+            lines.append("  " + "  ·  ".join(svcs))
+    return "\n".join(lines)
+
+
+def _fmt_gpu(raw: str) -> str:
+    lines, out = raw.splitlines(), []
+    for line in lines:
+        l = line.strip()
+        if any(k in l for k in ("Driver", "CUDA", "GPU 0", "MiB", "WAT", "%", "Temp")):
+            out.append(l)
+    return "\n".join(out[:12]) if out else raw
+
+
+def _format_action_output(action: str, output: str) -> str:
+    if action == "services":
+        return _fmt_services(output)
+    if action == "gpu":
+        return f"*GPU*\n```\n{_fmt_gpu(output)}\n```"
+    return f"```\n{output[:3000]}\n```"
+
+
 def run_action_via_api(action: str, arg: str = "") -> str:
     """Call the Jarvis API to execute an action."""
     try:
@@ -528,7 +583,9 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         output = d.get("output", "")
         ok = d.get("success", True)
         icon = "✅" if ok else "❌"
-        return f"{icon} {action}\n```\n{output[:3000]}\n```" if output else f"{icon} Done."
+        if not output:
+            return f"{icon} Done."
+        return f"{icon} {_format_action_output(action, output)}"
     except Exception as e:
         return f"Action error: {e}"
 
