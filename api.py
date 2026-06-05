@@ -688,6 +688,14 @@ def _get_chat_id(token: str) -> int | None:
     return None
 
 
+def _to_legacy_markdown(text: str) -> str:
+    # Telegram's legacy "Markdown" parse_mode uses single-`*` for bold; callers
+    # write `**bold**` (MarkdownV2/GitHub style), which 400s. Collapse `**`/`__`
+    # to their legacy single-char forms so formatting renders instead of being
+    # lost to the plain-text fallback below.
+    return text.replace("**", "*").replace("__", "_")
+
+
 def _send_telegram_direct(text: str) -> bool:
     token = _get_telegram_token()
     if not token:
@@ -697,13 +705,16 @@ def _send_telegram_direct(text: str) -> bool:
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        # Try Markdown first, but Telegram 400s on malformed entities (e.g. the
-        # `**bold**` MarkdownV2 syntax some callers use vs legacy single-`*`).
-        # On any non-OK response, retry as plain text so approval prompts and
-        # alerts are NEVER silently dropped.
+        # Try normalized Markdown first so bold/code render. If Telegram still
+        # 400s on some other malformed entity, retry as plain text so approval
+        # prompts and alerts are NEVER silently dropped.
         r = requests.post(
             url,
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            json={
+                "chat_id": chat_id,
+                "text": _to_legacy_markdown(text),
+                "parse_mode": "Markdown",
+            },
             timeout=10,
         )
         if r.status_code == 200 and r.json().get("ok"):
