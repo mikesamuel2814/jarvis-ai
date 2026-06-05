@@ -16,8 +16,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+# OMP_NUM_THREADS must be set before any native lib (numpy/openmp via chromadb)
+# initializes — single-threaded import is ~4x less likely to trip the
+# intermittent chromadb C-extension import segfault on Python 3.13 / RTX 3050.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+# chromadb imported lazily inside get_collection() — a top-level import flaps
+# the service on startup (segfaults ~25% of runs, see learner.py / indexer.py).
 import requests
-import chromadb
 import ollama
 import psutil
 import uvicorn
@@ -145,6 +151,7 @@ _collection = None
 def get_collection():
     global _chroma_client, _collection
     if _collection is None:
+        import chromadb  # lazy: top-level import flaps service startup (see header)
         Path(MEMORY_PATH).mkdir(parents=True, exist_ok=True)
         _chroma_client = chromadb.PersistentClient(path=MEMORY_PATH)
         _collection = _chroma_client.get_or_create_collection(

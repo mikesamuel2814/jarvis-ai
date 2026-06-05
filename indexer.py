@@ -62,6 +62,7 @@ def log(msg):
 
 
 def get_chroma_client(config):
+    import chromadb  # lazy: top-level import segfaults ~25% of runs (see header)
     memory_path = config["memory"]["path"]
     Path(memory_path).mkdir(parents=True, exist_ok=True)
     return chromadb.PersistentClient(path=memory_path)
