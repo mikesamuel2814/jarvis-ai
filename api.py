@@ -23,6 +23,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 # chromadb imported lazily inside get_collection() — a top-level import flaps
 # the service on startup (segfaults ~25% of runs, see learner.py / indexer.py).
+import hashlib
 import requests
 import ollama
 import psutil
@@ -56,6 +57,31 @@ app.add_middleware(
 
 # Serialise Ollama calls — 6GB VRAM can't load two models simultaneously
 _ollama_lock = threading.Semaphore(1)
+
+# ── In-memory response cache (300 entries, 600s TTL) ─────────────────────────
+_response_cache: dict[str, dict] = {}
+_CACHE_MAX = 300
+_CACHE_TTL = 600  # seconds
+
+def _cache_key(query: str) -> str:
+    return hashlib.sha256(query.lower().strip().encode()).hexdigest()[:16]
+
+def _cache_get(query: str) -> str | None:
+    key = _cache_key(query)
+    entry = _response_cache.get(key)
+    if entry and (time.time() - entry["ts"]) < _CACHE_TTL:
+        entry["hits"] = entry.get("hits", 0) + 1
+        return entry["response"]
+    return None
+
+def _cache_put(query: str, response: str) -> None:
+    if len(_response_cache) >= _CACHE_MAX:
+        _response_cache.pop(next(iter(_response_cache)))
+    _response_cache[_cache_key(query)] = {"response": response, "ts": time.time(), "hits": 0}
+
+# ── In-memory embedding cache (2000 entries) ──────────────────────────────────
+_embed_cache: dict[str, list] = {}
+_EMBED_CACHE_MAX = 2000
 
 
 def _ollama_chat(model: str, messages: list, options: dict, retries: int = 3) -> dict:
@@ -153,7 +179,10 @@ def get_collection():
     if _collection is None:
         import chromadb  # lazy: top-level import flaps service startup (see header)
         Path(MEMORY_PATH).mkdir(parents=True, exist_ok=True)
-        _chroma_client = chromadb.PersistentClient(path=MEMORY_PATH)
+        _chroma_client = chromadb.PersistentClient(
+            path=MEMORY_PATH,
+            settings=chromadb.Settings(anonymized_telemetry=False, allow_reset=True),
+        )
         _collection = _chroma_client.get_or_create_collection(
             name="jarvis_memory",
             metadata={"hnsw:space": "cosine"},
@@ -162,9 +191,16 @@ def get_collection():
 
 
 def get_embedding(text):
+    key = text[:500]
+    if key in _embed_cache:
+        return _embed_cache[key]
     try:
         response = ollama.embeddings(model=EMBED_MODEL, prompt=text[:4096])
-        return response["embedding"]
+        emb = response["embedding"]
+        if len(_embed_cache) >= _EMBED_CACHE_MAX:
+            _embed_cache.pop(next(iter(_embed_cache)))
+        _embed_cache[key] = emb
+        return emb
     except Exception:
         return None
 
@@ -486,7 +522,13 @@ def query(req: QueryRequest):
     # Tune temperature by query type — keep low to reduce hallucination
     temp = 0.3
 
-    opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 2048}
+    # Serve from RAM cache if recent identical query exists
+    cached = _cache_get(req.query)
+    if cached:
+        return {"response": cached, "model": model, "cached": True,
+                "context_used": len(context), "timestamp": datetime.now().isoformat()}
+
+    opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 8192, "num_keep": 256}
     try:
         response = _ollama_chat(model=model, messages=messages, options=opts)
         answer = strip_thinking(response["message"]["content"]).strip()
@@ -507,6 +549,7 @@ def query(req: QueryRequest):
     iid = str(uuid.uuid4())[:12]
     if not is_casual(req.query):
         log_interaction(iid, req.query, answer, model)
+        _cache_put(req.query, answer)
 
     return QueryResponse(
         response=answer,
@@ -1111,7 +1154,7 @@ def openclaw_webhook(payload: WebhookPayload):
         messages = build_messages(payload.text, context)
         try:
             resp = ollama.chat(model=PRIMARY_MODEL, messages=messages,
-                               options={"temperature": 0.3, "num_predict": 512, "num_ctx": 2048})
+                               options={"temperature": 0.3, "num_predict": 1024, "num_ctx": 8192, "num_keep": 256})
             answer = resp["message"]["content"].strip()
             _send_telegram_direct(f"📡 OpenClaw: {payload.text}\n\n{answer}")
             return {"response": answer}
