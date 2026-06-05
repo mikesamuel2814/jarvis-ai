@@ -60,6 +60,18 @@ ACTIONS: dict[str, dict] = {
     "docker_up":         {"desc": "Start Jarvis Docker stack",             "cmd": "cd /home/kali/.jarvis/docker && docker compose up -d jarvis-api jarvis-telegram", "tier": CONFIRM},
     "docker_down":       {"desc": "Stop Jarvis Docker stack",              "cmd": "cd /home/kali/.jarvis/docker && docker compose down", "tier": CONFIRM},
 
+    # ── VPS project monitoring (auto) ────────────────────────────────────────
+    "pm2_status":        {"desc": "VPS PM2 process list",                  "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 list 2>&1 | head -30'",                                                  "tier": AUTO},
+    "pm2_logs_gateway":  {"desc": "AsthaCash gateway backend logs",        "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs gateway-backend --lines 20 --nostream 2>&1'",                       "tier": AUTO},
+    "pm2_logs_starline": {"desc": "Starline API server logs",              "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs api-server --lines 20 --nostream 2>&1'",                            "tier": AUTO},
+    "git_status_all":    {"desc": "Git status across all projects",        "cmd": r"find /home/kali/Projects -name '.git' -maxdepth 3 -exec sh -c 'echo \"=== $(dirname {}) ===\"; git -C $(dirname {}) status --short' \;", "tier": AUTO},
+    "nginx_status":      {"desc": "VPS Nginx status and config test",      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl is-active nginx && nginx -t 2>&1'",                                "tier": AUTO},
+    "jarvis_logs_tail":  {"desc": "Jarvis API latest logs",                "cmd": "tail -50 /home/kali/.jarvis/logs/jarvis.log",                                                                                      "tier": AUTO},
+
+    # ── VPS project restarts (confirm) ───────────────────────────────────────
+    "restart_gateway":   {"desc": "Restart AsthaCash gateway backend on VPS", "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart gateway-backend 2>&1'",                                      "tier": CONFIRM},
+    "restart_starline":  {"desc": "Restart Starline API server on VPS",    "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart api-server 2>&1'",                                              "tier": CONFIRM},
+
     # ── High risk (approve) ───────────────────────────────────────────────────
     "deploy_vps":        {"desc": "Deploy to VPS (git pull + pm2 restart)", "cmd": None,                                        "tier": APPROVE},
     "ssh_cmd":           {"desc": "Run command on VPS via SSH",    "cmd": None,                                                  "tier": APPROVE},
@@ -82,7 +94,8 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["open ports", "listening ports", "show ports"],                              "ports"),
     (["who is logged", "logged in users", "active users"],                         "who"),
     (["running services", "list services", "show services"],                       "services"),
-    (["jarvis logs", "api logs", "show jarvis logs"],                              "logs_jarvis"),
+    (["jarvis logs", "show jarvis logs"],                                          "logs_jarvis"),
+    (["api logs", "show jarvis log", "jarvis log tail", "tail jarvis log"],        "jarvis_logs_tail"),
     (["telegram logs", "bot logs", "show bot logs"],                               "logs_telegram"),
     (["ollama logs"],                                                               "logs_ollama"),
     (["cron jobs", "crontab", "scheduled tasks"],                                  "crontab"),
@@ -100,6 +113,15 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["reindex", "re-index", "index now", "update memory"],                        "reindex"),
     (["deploy", "deploy to vps", "deploy code"],                                   "deploy_vps"),
     (["claude task", "run claude", "claude code", "ask claude", "claude do", "jarvis code"], "claude_task"),
+
+    # ── VPS project monitoring ────────────────────────────────────────────────
+    (["pm2 status", "vps processes", "what's running on vps", "pm2 list"],         "pm2_status"),
+    (["gateway logs", "asthacash logs", "payment gateway logs", "gw logs"],        "pm2_logs_gateway"),
+    (["starline logs", "api server logs", "real estate logs"],                     "pm2_logs_starline"),
+    (["git status", "what's uncommitted", "dirty repos", "git changes"],           "git_status_all"),
+    (["restart gateway", "restart asthacash", "restart payment"],                  "restart_gateway"),
+    (["restart starline", "restart real estate", "restart api server"],            "restart_starline"),
+    (["nginx status", "nginx test", "web server status"],                          "nginx_status"),
 ]
 
 # Regex patterns for commands that need arg extraction
@@ -107,19 +129,46 @@ import re as _re
 _CLAUDE_RESUME_RE = _re.compile(r"^claude\s+(--resume|-r)\s+([0-9a-f-]{36})", _re.I)
 _CLAUDE_CMD_RE    = _re.compile(r"^claude\s+(.+)", _re.I)
 
+# Short Telegram aliases → action name (override NL_MAP when exact match)
+ACTION_ALIASES: dict[str, str] = {
+    "gw logs":     "pm2_logs_gateway",
+    "gw restart":  "restart_gateway",
+    "sl logs":     "pm2_logs_starline",
+    "sl restart":  "restart_starline",
+    "pm2":         "pm2_status",
+    "git st":      "git_status_all",
+    "nginx":       "nginx_status",
+    "jlogs":       "jarvis_logs_tail",
+}
+
 
 def detect_action(text: str) -> str | None:
-    """Detect if a message is an action command. Returns action name or None."""
+    """Detect if a message is an action command. Returns action name or None.
+
+    Matching priority:
+      1. Raw 'claude ...' CLI passthrough.
+      2. Exact alias match (ACTION_ALIASES).
+      3. Longest NL_MAP phrase that appears in the query wins (specificity).
+    """
     t = text.strip()
-    # Detect raw claude CLI invocations (e.g. "claude --resume UUID")
+    # 1. Raw claude CLI invocations
     if _CLAUDE_RESUME_RE.match(t) or _CLAUDE_CMD_RE.match(t):
         return "claude_task"
     tl = t.lower().rstrip("?.!")
+
+    # 2. Alias exact match
+    if tl in ACTION_ALIASES:
+        return ACTION_ALIASES[tl]
+
+    # 3. Longest-phrase-wins across NL_MAP
+    best_action: str | None = None
+    best_len: int = 0
     for phrases, action in NL_MAP:
         for phrase in phrases:
-            if phrase in tl or tl.startswith(phrase):
-                return action
-    return None
+            if (phrase in tl or tl.startswith(phrase)) and len(phrase) > best_len:
+                best_action = action
+                best_len = len(phrase)
+    return best_action
 
 
 def extract_action_arg(text: str, action: str) -> str:
