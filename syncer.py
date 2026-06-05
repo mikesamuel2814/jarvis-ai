@@ -75,6 +75,73 @@ def _get_changed_files() -> list[str]:
     return files
 
 
+def _classify_change(files: list[str]) -> str:
+    """Rule-based fallback: infer a conventional-commit prefix from the file list."""
+    names = [Path(f).name for f in files]
+    if len(files) == 1:
+        stem = Path(files[0]).stem
+        return f"update: {stem}"
+    # Group by type
+    scripts = [n for n in names if n.endswith(".py")]
+    configs = [n for n in names if n.endswith((".yaml", ".yml", ".json"))]
+    docs    = [n for n in names if n.endswith(".md")]
+    if scripts and not configs and not docs:
+        return "update: " + ", ".join(s.replace(".py", "") for s in scripts[:3])
+    if configs and not scripts:
+        return "config: " + ", ".join(c for c in configs[:3])
+    if docs and not scripts and not configs:
+        return "docs: " + ", ".join(d for d in docs[:3])
+    summary = ", ".join(names[:4])
+    if len(names) > 4:
+        summary += f" (+{len(names) - 4} more)"
+    return f"update: {summary}"
+
+
+def _diff_summary(files: list[str]) -> str:
+    """Build a compact human-readable summary of what changed (no raw code)."""
+    lines = []
+    for f in files[:6]:
+        _, d = _git(["diff", "--cached", "-U0", "--", f])
+        added   = [l[1:].strip() for l in d.splitlines() if l.startswith("+") and not l.startswith("+++")]
+        removed = [l[1:].strip() for l in d.splitlines() if l.startswith("-") and not l.startswith("---")]
+        # Extract function/class names touched
+        defs = [l for l in added + removed if l.startswith(("def ", "class ", "async def "))]
+        name = Path(f).name
+        if defs:
+            fn_names = ", ".join(d.split("(")[0].split()[-1] for d in defs[:4])
+            lines.append(f"{name}: modified {fn_names} (+{len(added)}/-{len(removed)} lines)")
+        else:
+            lines.append(f"{name}: +{len(added)}/-{len(removed)} lines")
+    return "; ".join(lines)
+
+
+def _llm_commit_message(files: list[str]) -> str | None:
+    """Ask phi4-mini for a conventional commit message based on a diff summary."""
+    try:
+        import requests as _req
+        summary = _diff_summary(files)
+        prompt = (
+            f"Write one git commit message (max 72 chars) in conventional commit format.\n"
+            f"Changes: {summary}\n"
+            f"Format: type(scope): short description\n"
+            f"type must be one of: fix, feat, refactor, update, config, docs\n"
+            f"Output the commit message only. No quotes. No period."
+        )
+        resp = _req.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "phi4-mini", "prompt": prompt, "stream": False,
+                  "options": {"temperature": 0.2, "num_predict": 30, "num_ctx": 256}},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            msg = resp.json().get("response", "").strip().splitlines()[0].strip().strip('"\'')
+            if 10 < len(msg) <= 80:
+                return msg
+    except Exception:
+        pass
+    return None
+
+
 def sync():
     """Stage, commit, and push all changes to both remotes."""
     log.info("Sync triggered — checking for changes...")
@@ -89,11 +156,11 @@ def sync():
         return
 
     changed_names = staged.strip().splitlines()
-    summary = ", ".join(changed_names[:5])
-    if len(changed_names) > 5:
-        summary += f" (+{len(changed_names) - 5} more)"
 
-    commit_msg = f"auto-sync: {summary}"
+    commit_msg = _llm_commit_message(changed_names)
+    if not commit_msg:
+        commit_msg = _classify_change(changed_names)
+
     rc, out = _git(["commit", "-m", commit_msg])
     if rc != 0:
         log.error(f"Commit failed: {out}")
