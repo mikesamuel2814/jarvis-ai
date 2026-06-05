@@ -212,6 +212,11 @@ def _is_voice_on(uid: int) -> bool:
     return _voice_mode.get(uid, False)
 
 
+def _to_legacy_markdown(text: str) -> str:
+    # Telegram legacy Markdown uses single * for bold; **bold** 400s.
+    return text.replace("**", "*").replace("__", "_")
+
+
 def _send_voice_for_response(text: str) -> bool:
     """Call Jarvis API to send TTS audio to Telegram."""
     try:
@@ -529,7 +534,7 @@ def main():
 
     async def send(update: Update, text: str):
         for part in split_message(text):
-            await update.message.reply_text(part, parse_mode="Markdown")
+            await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -803,9 +808,9 @@ def main():
             _trigger_training_if_due()
             for i, part in enumerate(split_message(answer)):
                 if i == 0:
-                    await thinking_msg.edit_text(part, parse_mode="Markdown")
+                    await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
                 else:
-                    await update.message.reply_text(part, parse_mode="Markdown")
+                    await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
         except Exception as e:
             log.error(f"Photo analysis error: {e}")
             await thinking_msg.edit_text(f"Image analysis failed: {e}")
@@ -860,9 +865,9 @@ def main():
             parts = split_message(response)
             for i, part in enumerate(parts):
                 if i == 0:
-                    await thinking_msg.edit_text(part, parse_mode="Markdown")
+                    await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
                 else:
-                    await update.message.reply_text(part, parse_mode="Markdown")
+                    await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
             # Show feedback buttons after the last part (only for logged interactions)
             if iid:
                 await update.message.reply_text(
