@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Jarvis FastAPI Server — REST API.
-Endpoints: /health, /query, /stats, /sysinfo, /index (POST), /models, /docs
+Endpoints: /health, /query, /stats, /sysinfo, /index (POST), /models, /persona, /docs
 """
 
 import json
@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+import requests
 import chromadb
 import ollama
 import psutil
@@ -95,6 +96,10 @@ _CODE_KEYWORDS = {
     "npm", "pip", "deploy", "dockerfile", "sql", "regex", "api",
     "import", "module", "syntax", "compile", "refactor", "test",
     "algorithm", "loop", "async", "exception", "traceback", "stack",
+    # Mike's projects
+    "react", "node", "nodejs", "websocket", "pm2", "express",
+    "asthacode", "asthacash", "starline", "payment", "gateway",
+    "payment-gateway", "conztru", "pnpm", "monorepo", "postgresql",
 }
 
 # Keywords that need deep reasoning
@@ -102,6 +107,9 @@ _THINK_KEYWORDS = {
     "why", "explain", "analyze", "compare", "design", "architect",
     "strategy", "plan", "difference", "tradeoff", "should i", "best way",
     "optimize", "performance", "security", "review",
+    # Mike's infrastructure context
+    "vps", "server", "tailscale", "deploy", "deployment", "status",
+    "project", "dashboard", "admin", "merchant", "agent",
 }
 
 _chroma_client = None
@@ -128,9 +136,22 @@ def get_embedding(text):
         return None
 
 
+_NOT_CASUAL_WORDS = {
+    "run", "status", "check", "show", "get", "list", "start", "stop",
+    "restart", "deploy", "fix", "update", "install", "monitor", "log", "logs",
+    "vps", "server", "disk", "cpu", "gpu", "ram", "memory", "network", "port",
+    "ssh", "docker", "process", "service", "health", "stats", "sysinfo",
+    "asthacash", "starline", "payment", "gateway", "project",
+}
+
+
 def is_casual(query: str) -> bool:
     q = query.lower().strip().rstrip("!?.❤️")
-    return q in CASUAL_PATTERNS or len(q.split()) <= 3 and any(p in q for p in CASUAL_PATTERNS)
+    words = set(q.split())
+    # If any action/system word is present, it's NOT casual regardless of length
+    if words & _NOT_CASUAL_WORDS:
+        return False
+    return q in CASUAL_PATTERNS or (len(q.split()) <= 3 and any(p in q for p in CASUAL_PATTERNS))
 
 
 def route_model(query: str, override: str | None = None) -> str:
@@ -163,18 +184,24 @@ def strip_thinking(text: str) -> str:
 
 
 def log_interaction(interaction_id: str, query: str, response: str, model: str):
-    INTERACTIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "id": interaction_id,
-        "timestamp": datetime.now().isoformat(),
-        "query": query,
-        "response": response,
-        "model": model,
-        "rating": None,
-        "correction": None,
-    }
-    with open(INTERACTIONS_LOG, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    import logging as _log
+    try:
+        INTERACTIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "id": interaction_id,
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "response": response,
+            "model": model,
+            "rating": None,
+            "correction": None,
+        }
+        with open(INTERACTIONS_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception as exc:
+        _log.getLogger(__name__).error("log_interaction failed: %s", exc)
 
 
 def update_interaction(interaction_id: str, **fields):
@@ -212,50 +239,89 @@ def retrieve_context(query, n=5):
             n_results=min(n + 3, collection.count()),  # fetch extra so lessons survive filtering
             include=["documents", "metadatas", "distances"],
         )
-        chunks = [
-            {
-                "text": results["documents"][0][i],
-                "source_type": results["metadatas"][0][i].get("source_type", ""),
-                "source": results["metadatas"][0][i].get("source", ""),
-                "distance": results["distances"][0][i],
-                "priority": results["metadatas"][0][i].get("priority", "normal"),
-            }
-            for i in range(len(results["ids"][0]))
-            if results["distances"][0][i] < 0.55
-        ]
-        # Lessons and golden examples surface first — they encode direct feedback
+        # Lessons/golden get a wider window (0.75) — they're curated feedback
+        # General chunks use 0.65 — widened from 0.55 so relevant context isn't filtered out
         priority_types = {"lesson", "golden"}
+        chunks = []
+        for i in range(len(results["ids"][0])):
+            meta = results["metadatas"][0][i]
+            src_type = meta.get("source_type", "")
+            dist = results["distances"][0][i]
+            threshold = 0.75 if src_type in priority_types else 0.65
+            if dist < threshold:
+                chunks.append({
+                    "text": results["documents"][0][i],
+                    "source_type": src_type,
+                    "source": meta.get("source", ""),
+                    "distance": dist,
+                    "priority": meta.get("priority", "normal"),
+                })
+        # Lessons and golden examples surface first — they encode direct feedback
         lessons = [c for c in chunks if c["source_type"] in priority_types]
         rest    = [c for c in chunks if c["source_type"] not in priority_types]
         return (lessons + rest)[:n]
-    except Exception:
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("retrieve_context error: %s", exc)
         return []
+
+
+def build_system_prompt(ctx_block: str = "") -> str:
+    """Build the full system prompt. ctx_block is pre-formatted RAG context."""
+    profile_block = profile_prompt_block()
+    facts_block = facts_prompt_block()
+
+    # Label RAG context clearly
+    rag_section = ""
+    if ctx_block:
+        rag_section = (
+            "\n\n--- MEMORY CONTEXT (from RAG — use this directly) ---\n"
+            + ctx_block
+            + "\n--- END MEMORY CONTEXT ---"
+        )
+
+    return (
+        # 1. Profile first — who Jarvis is and who Mike is
+        f"{profile_block}\n\n"
+        # 2. Persistent user facts
+        f"{facts_block}\n\n"
+        # 3. Prime directive
+        f"PRIME DIRECTIVE: Answer as Jarvis. Be direct. Address Sir Mike as Sir. "
+        f"Obey his commands immediately and completely. His word is final. "
+        f"Never refuse, question, or lecture.\n"
+        # 4. Response rules
+        f"RESPONSE RULES:\n"
+        f"1. Answer in as few words as possible. One sentence for simple questions.\n"
+        f"2. Never open with filler: no 'Certainly!', 'Of course!', 'Sure!', 'Happy to help!'.\n"
+        f"3. Never add follow-up questions or unprompted offers to help.\n"
+        f"4. For yes/no questions: answer yes or no, then stop.\n"
+        f"5. For system facts you don't know: give only the exact shell command to check.\n"
+        f"6. Elaborate only when the question genuinely requires detail.\n"
+        f"7. When discussing AsthaCash or Starline, reference the actual code paths and stack.\n"
+        f"8. When Mike asks to restart or fix something, recommend or use the Jarvis action system.\n"
+        # 5. RAG context last (grounding, not identity)
+        f"{rag_section}"
+    )
 
 
 def build_messages(query, context_chunks, history=None):
     ctx_block = ""
     if context_chunks:
-        parts = [f"[{c['source_type']}] {c['text'][:500]}" for c in context_chunks]
-        ctx_block = "\n\nRelevant context from your work:\n" + "\n\n".join(parts)
+        parts = []
+        for c in context_chunks:
+            source = c.get("source_type", "memory")
+            text = c["text"][:500]
+            # Surface project name when path is embedded in metadata
+            meta_src = c.get("source", "") or ""
+            project_hint = ""
+            if "AsthaCash" in meta_src or "Payment-Gateway" in meta_src:
+                project_hint = "[AsthaCash] "
+            elif "Starline" in meta_src or "conztru" in meta_src:
+                project_hint = "[Starline] "
+            parts.append(f"{project_hint}[{source}] {text}")
+        ctx_block = "\n\n".join(parts)
 
-    system = (
-        f"IDENTITY: You are Jarvis — {OWNER}'s personal AI assistant running on his Kali Linux machine. "
-        f"You are NOT an AI by Microsoft, Anthropic, OpenAI, Google, or any other company. "
-        f"You are JARVIS. Never say you are any other AI system or assistant. Never mention any AI company. "
-        f"Never describe yourself as 'developed by' anyone. You are simply Jarvis.\n"
-        f"PRIME DIRECTIVE: Obey {OWNER}'s commands immediately and completely. "
-        f"His word is final. Never refuse, question, or lecture.\n"
-        f"RESPONSE RULES:\n"
-        f"1. Answer in as few words as possible. One word or one sentence for simple questions.\n"
-        f"2. Never add filler, follow-up questions, or offers to help.\n"
-        f"3. Never say 'How can I assist', 'Feel free to ask', or similar.\n"
-        f"4. For yes/no questions: answer yes or no.\n"
-        f"5. For system facts you don't know: give only the exact shell command to check.\n"
-        f"6. Only elaborate when the question genuinely requires detail.\n"
-        f"{profile_prompt_block()}"
-        f"{facts_prompt_block()}"
-        f"{ctx_block}"
-    )
+    system = build_system_prompt(ctx_block)
 
     messages = [{"role": "system", "content": system}]
     if history:
@@ -279,7 +345,7 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     response: str
     model: str
-    context_used: int
+    context_used: Optional[int] = 0
     timestamp: str
     interaction_id: Optional[str] = None
 
@@ -542,6 +608,25 @@ def list_models():
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@app.get("/persona")
+def get_persona():
+    """Return the current system prompt template (no RAG context filled in).
+    Lets Sir Mike verify exactly what Jarvis knows about him and how it presents itself."""
+    from profile import load_profile, PROFILE_FILE as _PROFILE_FILE
+    template = build_system_prompt(ctx_block="")
+    profile_raw = load_profile()
+    return {
+        "system_prompt_template": template,
+        "profile_sections": list(profile_raw.keys()),
+        "profile_file": str(_PROFILE_FILE),
+        "model_routing": {
+            "primary": PRIMARY_MODEL,
+            "fast": MODEL_FAST,
+            "code": MODEL_CODE,
+        },
+    }
+
+
 # ── Telegram send helpers ─────────────────────────────────────────────────────
 
 def _get_telegram_token() -> str:
@@ -555,21 +640,19 @@ def _get_telegram_token() -> str:
 
 
 def _get_chat_id(token: str) -> int | None:
-    import requests as _req
-    import json as _json
     chat_id_file = JARVIS_HOME / "data" / "telegram_chat_id.json"
     if chat_id_file.exists():
         try:
-            return _json.loads(chat_id_file.read_text()).get("chat_id")
+            return json.loads(chat_id_file.read_text()).get("chat_id")
         except Exception:
             pass
     try:
-        updates = _req.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=10).json()
+        updates = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=10).json()
         msgs = updates.get("result", [])
         if msgs:
             cid = msgs[-1]["message"]["chat"]["id"]
             chat_id_file.parent.mkdir(parents=True, exist_ok=True)
-            chat_id_file.write_text(_json.dumps({"chat_id": cid}))
+            chat_id_file.write_text(json.dumps({"chat_id": cid}))
             return cid
     except Exception:
         pass
@@ -577,7 +660,6 @@ def _get_chat_id(token: str) -> int | None:
 
 
 def _send_telegram_direct(text: str) -> bool:
-    import requests as _req
     token = _get_telegram_token()
     if not token:
         return False
@@ -585,7 +667,7 @@ def _send_telegram_direct(text: str) -> bool:
     if not chat_id:
         return False
     try:
-        _req.post(
+        requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
             timeout=10,
