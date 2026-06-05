@@ -227,7 +227,7 @@ def index_claude_code_sessions(collection, config, embed_model):
         text = _extract_claude_code_text(f)
         if not text.strip():
             continue
-        chunks = chunk_text(text)
+        chunks = chunk_text(text, chunk_size=500, overlap=60)
         added = 0
         for i, chunk in enumerate(chunks):
             emb = get_embedding(chunk, embed_model)
