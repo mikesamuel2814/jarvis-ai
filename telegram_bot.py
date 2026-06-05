@@ -115,12 +115,22 @@ SYSINFO_TRIGGERS = {
     "full stats", "give me full stats", "system spec", "system specs",
     "python version", "python3 version", "check python", "what python",
     "current python", "python installed", "show python version",
+    "stats", "jarvis stats", "openclaw stats", "brain stats", "memory stats",
+    "claude stats", "all stats", "give stats", "show me stats",
 }
+
+# Any query that is just "<word> stats" or "stats <word>" routes to stats card
+_STATS_RE = re.compile(r'\bstats?\b', re.IGNORECASE)
 
 
 def is_sysinfo_request(text: str) -> bool:
     t = text.lower().strip().rstrip("?.!")
-    return t in SYSINFO_TRIGGERS or any(t.startswith(p) for p in SYSINFO_TRIGGERS)
+    if t in SYSINFO_TRIGGERS or any(t.startswith(p) for p in SYSINFO_TRIGGERS):
+        return True
+    # Catch any short query that contains the word "stats" (≤ 5 words)
+    if _STATS_RE.search(t) and len(t.split()) <= 5:
+        return True
+    return False
 
 
 def get_python_version() -> str:
