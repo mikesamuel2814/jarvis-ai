@@ -15,7 +15,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import chromadb
+# OMP_NUM_THREADS must be set before any native lib (numpy/openmp via chromadb)
+# initializes — single-threaded import is ~4x less likely to trip the
+# intermittent chromadb C-extension import segfault on Python 3.13 / RTX 3050.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+# chromadb imported lazily inside get_chroma_client() — a top-level import
+# segfaults ~25% of runs (see learner.py), silently killing the index cycle.
 import ollama
 import yaml
 
