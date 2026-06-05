@@ -1,0 +1,77 @@
+# Mike Samuel — Jarvis Master Profile
+# Loaded into EVERY Jarvis context. Always authoritative.
+
+identity:
+  name: Mike Samuel
+  email: mikesamuel2814@gmail.com
+  address_as: Sir
+  role: Full-stack developer & entrepreneur
+  location: Kali Linux workstation /home/kali
+
+tech_stack:
+  primary: Python
+  languages: [Python, JavaScript, TypeScript, Bash, SQL]
+  frontend: [React, pnpm]
+  backend: [Node.js, Express, FastAPI, WebSocket]
+  databases: [PostgreSQL, MongoDB]
+  devops: [Git, Docker, PM2, Nginx, Tailscale, GitHub Actions, SSH]
+  ai_tools: [Claude Code, Cursor, Ollama, Jarvis]
+  os: [Kali Linux, Ubuntu (VPS)]
+
+hardware:
+  cpu: i9-14900KF
+  ram: 64GB
+  gpu: RTX 3050 6GB VRAM
+  note: VRAM limited — prefer 7B models, num_ctx 2048 max
+  upgrade_planned: NVIDIA Project DIGITS / RTX Spark ~128GB unified (future)
+
+projects:
+  - name: AsthaCash
+    alias: Payment-Gateway
+    path: /home/kali/Projects/kalimike/Payment-Gateway/
+    type: Payment gateway
+    stack: [React, Node.js, WebSocket, Android automation]
+    parts:
+      gateway-admin: React dashboard — pages adminDashboard, agentDashboard, merchantDashboard, transaction, account
+      gateway-backend: Node.js WebSocket server for Android automation
+    vps: "38.47.35.16"
+    process_manager: PM2
+
+  - name: Starline-Final-web
+    path: /home/kali/Projects/kalimike/Starline-Final-web/
+    type: Real estate website
+    stack: [React, Express, PostgreSQL, pnpm monorepo]
+    parts:
+      conztru: React frontend
+      api-server: Express API server
+    ci_cd: "push to main → GitHub Actions → SSH deploy to VPS (38.47.35.16)"
+    vps: "38.47.35.16"
+
+infrastructure:
+  vps_host: "38.47.35.16"
+  vps_user: admin93
+  tailscale_ip: "100.110.210.103"
+  process_manager: PM2
+  web_server: Nginx
+
+jarvis_stack:
+  brain: deepseek-r1:7b via Ollama
+  fast_model: phi4-mini
+  code_model: qwen2.5-coder:7b
+  vision_model: llava:7b
+  memory: ChromaDB at ~/.jarvis/memory/
+  api_port: 8181
+  telegram_bot: "@MikePiJarvisBot"
+
+preferences:
+  communication: direct, minimal, technical — one line when possible
+  code_style: functional, no over-abstraction, no unnecessary comments
+  decision_autonomy: high — take action automatically when safe, notify me after
+  approval_required: [destructive operations, public deployments, payments, system reboots]
+  notifications: Telegram + voice for important alerts
+
+work_patterns:
+  primary_tools: [Claude Code, Cursor, Git, Telegram]
+  vcs: Git (GitHub)
+  automation: prefers Jarvis to handle routine tasks autonomously
+  briefings: daily 9am summary, immediate alerts for outages

@@ -1,0 +1,33 @@
+name: Jarvis
+version: 2.0.0
+owner: Mike
+model:
+  primary: deepseek-r1:7b
+  fast: phi4-mini
+  code: qwen2.5-coder:7b
+  vision: llava:7b
+  fallback: phi4-mini
+  server: http://localhost:11434
+memory:
+  vector_db: chromadb
+  path: /home/kali/.jarvis/memory
+  embedding_model: mxbai-embed-large
+data_sources:
+  claude_sessions: /home/kali/.jarvis/data/claude
+  cursor_sessions: /home/kali/.jarvis/data/cursor
+  git_repos: /home/kali/Projects
+  shell_history: /home/kali/.zsh_history
+  vps_logs: /home/kali/.jarvis/data/deployments
+training:
+  schedule: weekly
+  min_new_samples: 50
+  output_dir: /home/kali/.jarvis/models
+interfaces:
+  telegram: true
+  cli: true
+  api_port: 8181
+  ollama_port: 11434
+openclaw:
+  enabled: true
+  vps_host: 38.47.35.16
+  tailscale_ip: 100.110.210.103

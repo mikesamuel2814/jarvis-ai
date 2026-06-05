@@ -1,0 +1,866 @@
+#!/usr/bin/env python3
+"""
+Jarvis Telegram Bot — mobile interface for Jarvis via Telegram.
+Reads token from ~/.jarvis/config/telegram.json
+Queries Jarvis API at localhost
+"""
+
+import asyncio
+import base64
+import json
+import logging
+import os
+import re
+import sys
+import tempfile
+from collections import deque
+from pathlib import Path
+
+import requests
+import subprocess
+import yaml
+
+from user_facts import facts_prompt_block, load_facts, save_facts, remember_from_message
+
+JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
+TOKEN_FILE = JARVIS_HOME / "config" / "telegram.json"
+CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
+LOG_FILE = JARVIS_HOME / "logs" / "telegram_bot.log"
+HISTORY_FILE = JARVIS_HOME / "data" / "telegram_history.json"
+
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [telegram_bot] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+log = logging.getLogger(__name__)
+
+MAX_HISTORY = 30  # messages per user kept on disk
+
+# Per-user conversation history — loaded from disk on startup
+_histories: dict[int, deque] = {}
+
+
+def _load_histories():
+    if HISTORY_FILE.exists():
+        try:
+            raw = json.loads(HISTORY_FILE.read_text())
+            for uid_str, msgs in raw.items():
+                _histories[int(uid_str)] = deque(msgs, maxlen=MAX_HISTORY)
+            log.info(f"Loaded history for {len(_histories)} user(s)")
+        except Exception as e:
+            log.warning(f"Could not load history: {e}")
+
+
+def _save_histories():
+    try:
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        raw = {str(uid): list(dq) for uid, dq in _histories.items()}
+        HISTORY_FILE.write_text(json.dumps(raw, indent=2))
+    except Exception as e:
+        log.warning(f"Could not save history: {e}")
+
+
+_load_histories()
+
+
+def load_token():
+    if not TOKEN_FILE.exists():
+        log.error(f"Token file not found: {TOKEN_FILE}")
+        sys.exit(1)
+    with open(TOKEN_FILE) as f:
+        data = json.load(f)
+    token = data.get("bot_token", "")
+    if not token or token == "YOUR_BOT_TOKEN_HERE":
+        log.error("Bot token not set in ~/.jarvis/config/telegram.json")
+        sys.exit(1)
+    return token
+
+
+def load_config():
+    if not CONFIG_FILE.exists():
+        return {"interfaces": {"api_port": 8181}, "owner": "Mike"}
+    with open(CONFIG_FILE) as f:
+        return yaml.safe_load(f)
+
+
+CONFIG = load_config()
+API_PORT = CONFIG.get("interfaces", {}).get("api_port", 8181)
+VISION_MODEL = CONFIG.get("model", {}).get("vision", "llava:7b")
+API_BASE = os.environ.get("JARVIS_API_URL", f"http://127.0.0.1:{API_PORT}")
+OWNER = CONFIG.get("owner", "Mike")
+
+
+def get_history(uid: int) -> list:
+    if uid not in _histories:
+        _histories[uid] = deque(maxlen=MAX_HISTORY)
+    return list(_histories[uid])
+
+
+def add_to_history(uid: int, role: str, content: str):
+    if uid not in _histories:
+        _histories[uid] = deque(maxlen=MAX_HISTORY)
+    _histories[uid].append({"role": role, "content": content})
+    _save_histories()
+
+
+SYSINFO_TRIGGERS = {
+    "system info", "sysinfo", "system information", "systeminfo",
+    "system stats", "system status", "machine info", "hardware info",
+    "what's my system", "whats my system", "show system", "show stats",
+    "full stats", "give me full stats", "system spec", "system specs",
+    "python version", "python3 version", "check python", "what python",
+    "current python", "python installed", "show python version",
+}
+
+
+def is_sysinfo_request(text: str) -> bool:
+    t = text.lower().strip().rstrip("?.!")
+    return t in SYSINFO_TRIGGERS or any(t.startswith(p) for p in SYSINFO_TRIGGERS)
+
+
+def get_python_version() -> str:
+    try:
+        r = subprocess.run(["python3", "--version"], capture_output=True, text=True, timeout=5)
+        return (r.stdout or r.stderr).strip()
+    except Exception:
+        return "unknown"
+
+
+def answer_preference_question(text: str) -> str | None:
+    """Answer from saved facts without calling the LLM."""
+    t = text.lower().strip().rstrip("?.!")
+    facts = load_facts()
+    if not facts:
+        return None
+    if any(
+        p in t
+        for p in (
+            "favourite language",
+            "favorite language",
+            "fav language",
+            "fav program",
+            "favorite program",
+            "favourite program",
+            "language i like",
+            "language i prefer",
+            "chosen language",
+            "choosen language",
+        )
+    ):
+        for key in ("programing_language", "programming_language", "language", "preference"):
+            if key in facts:
+                return facts[key]
+    return None
+
+
+_CASUAL_WORDS = {
+    "hello", "hi", "hey", "sup", "yo", "thanks", "thank you", "ok", "okay",
+    "cool", "nice", "great", "bye", "goodbye", "lol", "haha", "yes", "no",
+    "sure", "fine", "good", "bad", "wow",
+}
+
+_ACTION_SIGNALS = {
+    "check", "show", "get", "run", "list", "status", "restart", "stop",
+    "start", "deploy", "install", "fix", "update", "monitor", "log", "logs",
+    "what's", "whats", "how much", "how many", "is the", "are the", "ssh",
+    "vps", "server", "docker", "container", "service", "process", "memory",
+    "disk", "cpu", "gpu", "network", "port", "kill", "reboot",
+}
+
+
+def _is_casual(text: str) -> bool:
+    words = set(text.lower().split())
+    return (
+        words & _CASUAL_WORDS and not words & _ACTION_SIGNALS
+        or len(text.split()) <= 4 and not words & _ACTION_SIGNALS
+    )
+
+
+_last_interaction: dict[int, str] = {}  # uid → interaction_id
+_voice_mode: dict[int, bool] = {}       # uid → voice on/off
+
+VOICE_PREFS_FILE = JARVIS_HOME / "data" / "voice_prefs.json"
+
+
+def _load_voice_prefs():
+    try:
+        if VOICE_PREFS_FILE.exists():
+            prefs = json.loads(VOICE_PREFS_FILE.read_text())
+            for uid_str, val in prefs.items():
+                _voice_mode[int(uid_str)] = bool(val)
+    except Exception:
+        pass
+
+
+def _save_voice_prefs():
+    try:
+        VOICE_PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        VOICE_PREFS_FILE.write_text(json.dumps({str(k): v for k, v in _voice_mode.items()}))
+    except Exception:
+        pass
+
+
+_load_voice_prefs()
+
+
+def _is_voice_on(uid: int) -> bool:
+    return _voice_mode.get(uid, False)
+
+
+def _send_voice_for_response(text: str) -> bool:
+    """Call Jarvis API to send TTS audio to Telegram."""
+    try:
+        r = requests.post(f"{API_BASE}/voice/notify", json={"text": text}, timeout=45)
+        return r.ok
+    except Exception:
+        return False
+
+
+def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
+    # Route natural language sysinfo requests to the real endpoint
+    if is_sysinfo_request(text):
+        return get_sysinfo(), None
+
+    remembered = remember_from_message(text)
+    if remembered:
+        _key, val = remembered
+        add_to_history(uid, "user", text)
+        add_to_history(uid, "assistant", val)
+        return val, None
+
+    pref = answer_preference_question(text)
+    if pref:
+        add_to_history(uid, "user", text)
+        add_to_history(uid, "assistant", pref)
+        return pref, None
+
+    t = text.lower()
+    if "python version" in t or "python3 version" in t or (
+        "python" in t and "version" in t
+    ):
+        ver = get_python_version()
+        add_to_history(uid, "user", text)
+        add_to_history(uid, "assistant", ver)
+        return ver, None
+
+    history = get_history(uid)
+    payload = {
+        "query": text,
+        "context_results": 5,
+        "history": history,
+    }
+
+    # Route through Claude planner for non-casual messages that may need actions.
+    # Casual chat goes straight to /query (faster, no Claude overhead).
+    endpoint = "/query" if _is_casual(text) else "/claude-plan"
+
+    try:
+        resp = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=180)
+        # Retry once on 503 — model may still be loading
+        if resp.status_code == 503:
+            import time
+            time.sleep(8)
+            resp = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=180)
+        resp.raise_for_status()
+        data = resp.json()
+        answer = data.get("response", "No response received.")
+        iid = data.get("interaction_id")
+        add_to_history(uid, "user", text)
+        add_to_history(uid, "assistant", answer)
+        return answer, iid
+    except requests.exceptions.ConnectionError:
+        return "Jarvis API is not running. Try: sudo systemctl start jarvis", None
+    except requests.exceptions.Timeout:
+        return "Jarvis took too long to respond. The model may be busy.", None
+    except Exception as e:
+        return f"Error: {e}", None
+
+
+def get_stats() -> str:
+    try:
+        resp = requests.get(f"{API_BASE}/stats", timeout=10)
+        resp.raise_for_status()
+        d = resp.json()
+        lines = [
+            f"Memory chunks: {d.get('memory_chunks', 'N/A')}",
+            f"Model: {d.get('primary_model', 'N/A')}",
+            f"Embed: {d.get('embed_model', 'N/A')}",
+        ]
+        breakdown = d.get("source_type_breakdown", {})
+        if breakdown:
+            lines.append("\nSources:")
+            for k, v in sorted(breakdown.items(), key=lambda x: -x[1]):
+                lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Could not fetch stats: {e}"
+
+
+def get_health() -> str:
+    try:
+        resp = requests.get(f"{API_BASE}/health", timeout=10)
+        resp.raise_for_status()
+        d = resp.json()
+        emoji = "✅" if d.get("status") == "healthy" else "⚠️"
+        return (
+            f"{emoji} Status: {d.get('status')}\n"
+            f"Ollama: {d.get('ollama')}\n"
+            f"Memory: {d.get('memory')} ({d.get('memory_chunks', 0)} chunks)\n"
+            f"Model: {d.get('model')}"
+        )
+    except Exception as e:
+        return f"Health check failed: {e}"
+
+
+def get_sysinfo() -> str:
+    try:
+        resp = requests.get(f"{API_BASE}/sysinfo", timeout=15)
+        resp.raise_for_status()
+        d = resp.json()
+        lines = ["System Info\n"]
+
+        os_info = d.get("os", {})
+        if os_info and "system" in os_info:
+            lines.append(
+                f"OS: {os_info['system']} {os_info.get('release', '')}\n"
+                f"Host: {os_info.get('hostname', 'N/A')}\n"
+                f"Uptime: {os_info.get('uptime_hours', 'N/A')}h"
+            )
+
+        cpu = d.get("cpu", {})
+        if "cores_logical" in cpu:
+            lines.append(
+                f"\nCPU: {cpu.get('freq_mhz', 'N/A')} MHz — "
+                f"{cpu.get('cores_physical', '?')}c/{cpu.get('cores_logical', '?')}t — "
+                f"{cpu.get('usage_percent', 'N/A')}% usage"
+            )
+
+        ram = d.get("ram", {})
+        if "total_gb" in ram:
+            lines.append(
+                f"RAM: {ram.get('used_gb')} / {ram.get('total_gb')} GB "
+                f"({ram.get('usage_percent')}%)"
+            )
+
+        disk = d.get("disk", {})
+        if "total_gb" in disk:
+            lines.append(
+                f"Disk: {disk.get('used_gb')} / {disk.get('total_gb')} GB "
+                f"({disk.get('usage_percent')}%)"
+            )
+
+        gpu = d.get("gpu", {})
+        if "model" in gpu:
+            lines.append(
+                f"\nGPU: {gpu.get('model')}\n"
+                f"VRAM: {gpu.get('vram_used_mb')} / {gpu.get('vram_total_mb')} MB — "
+                f"{gpu.get('utilization_percent')}% — {gpu.get('temp_c')}°C"
+            )
+
+        net = d.get("network", {})
+        if net and not "error" in net:
+            ifaces = ", ".join(f"{k}: {v}" for k, v in net.items())
+            lines.append(f"\nNetwork: {ifaces}")
+
+        python_ver = d.get("python")
+        if python_ver:
+            lines.append(f"\n{python_ver}")
+
+        jarvis = d.get("jarvis", {})
+        if jarvis:
+            lines.append(
+                f"Jarvis: {jarvis.get('memory_chunks', 0)} memory chunks — "
+                f"model: {jarvis.get('model', 'N/A')}"
+            )
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Could not fetch system info: {e}"
+
+
+def trigger_index() -> str:
+    try:
+        resp = requests.post(f"{API_BASE}/index", json={}, timeout=300)
+        resp.raise_for_status()
+        d = resp.json()
+        return f"Indexing complete. Total chunks: {d.get('chunks', 'N/A')}"
+    except Exception as e:
+        return f"Indexing error: {e}"
+
+
+HELP_TEXT = (
+    "Jarvis Commands:\n"
+    "/start — Welcome\n"
+    "/help — This help\n"
+    "/stats — Memory stats\n"
+    "/sysinfo — Live system info\n"
+    "/health — Service health\n"
+    "/index — Re-index your work\n"
+    "/clear — Clear chat history\n"
+    "/remember KEY VALUE — Save a personal fact\n"
+    "/voice on|off — Toggle voice audio responses\n"
+    "/correct TEXT — Correct Jarvis's last answer (trains brain)\n"
+    "/learn — Run brain training now\n"
+    "/selfcheck — Full system self-check + health report\n"
+    "/approve ID — Approve a pending action\n"
+    "/deny ID — Deny a pending action\n"
+    "/actions — List available actions\n"
+    "/pending — Show pending approvals\n\n"
+    "After each response, tap 👍 or 👎 to train Jarvis.\n\n"
+    "Actions (type naturally):\n"
+    "  restart jarvis | restart bot | restart ollama\n"
+    "  show processes | disk space | memory usage\n"
+    "  gpu status | show logs | tailscale status\n\n"
+    "Or just chat — Jarvis remembers your conversation."
+)
+
+
+def split_message(text: str, limit: int = 4000) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+    parts = []
+    while text:
+        parts.append(text[:limit])
+        text = text[limit:]
+    return parts
+
+
+def _trigger_training_if_due():
+    """Run indexer in background if last training was >4h ago."""
+    stamp = JARVIS_HOME / "data" / "last_training.txt"
+    import time
+    now = time.time()
+    if stamp.exists():
+        try:
+            last = float(stamp.read_text().strip())
+            if now - last < 4 * 3600:
+                return
+        except Exception:
+            pass
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(str(now))
+    train_script = JARVIS_HOME / "train.sh"
+    if train_script.exists():
+        subprocess.Popen(
+            ["bash", str(train_script)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        log.info("Training triggered in background.")
+
+
+_IMAGE_SYSTEM = (
+    "You are Jarvis, a personal AI assistant for Mike (sole user, Kali Linux). "
+    "You are analyzing a screenshot or image from Mike's personal machine. "
+    "Mike's active projects:\n"
+    "  - AsthaCash: payment gateway — React admin dashboard (gateway-admin) + Node.js WebSocket backend (gateway-backend). "
+    "    Pages: adminDashboard, agentDashboard, merchantDashboard, transaction, account.\n"
+    "  - Starline-Final-web: real estate website — pnpm monorepo, React frontend (conztru), Express API (api-server), PostgreSQL.\n"
+    "  - Payment-Gateway: parent repo for AsthaCash.\n"
+    "When you see a UI screenshot, identify: which app/page it is (check against above), "
+    "exact text/numbers visible, any errors or warnings, UI component names, and what action Mike might want. "
+    "Never guess 'crypto wallet' or 'Ethereum' unless you clearly see ETH/blockchain UI elements. "
+    "Be precise — read visible text literally."
+)
+
+
+def analyze_image_sync(img_bytes: bytes, prompt: str) -> str:
+    """Run llava:7b on image bytes. Runs in a thread pool — do not call from async."""
+    import ollama as _ollama
+    resp = _ollama.generate(
+        model=VISION_MODEL,
+        prompt=prompt,
+        system=_IMAGE_SYSTEM,
+        images=[img_bytes],
+    )
+    return resp.response
+
+
+def run_action_via_api(action: str, arg: str = "") -> str:
+    """Call the Jarvis API to execute an action."""
+    try:
+        resp = requests.post(
+            f"{API_BASE}/action",
+            json={"action": action, "arg": arg},
+            timeout=90,
+        )
+        d = resp.json()
+        if d.get("status") == "pending":
+            return f"⏳ Approval required (ID: `{d['request_id']}`)\nReply /approve {d['request_id']} or /deny {d['request_id']}"
+        output = d.get("output", "")
+        ok = d.get("success", True)
+        icon = "✅" if ok else "❌"
+        return f"{icon} {action}\n```\n{output[:3000]}\n```" if output else f"{icon} Done."
+    except Exception as e:
+        return f"Action error: {e}"
+
+
+def main():
+    try:
+        from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+        from telegram.ext import (
+            Application,
+            CallbackQueryHandler,
+            CommandHandler,
+            ContextTypes,
+            MessageHandler,
+            filters,
+        )
+    except ImportError:
+        log.error("python-telegram-bot not installed.")
+        sys.exit(1)
+
+    token = load_token()
+
+    # Save chat_id on first message for monitor/analyze to use
+    def _cache_chat_id(uid: int):
+        cache = JARVIS_HOME / "data" / "telegram_chat_id.json"
+        if not cache.exists():
+            import json as _j
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(_j.dumps({"chat_id": uid}))
+
+    async def send(update: Update, text: str):
+        for part in split_message(text):
+            await update.message.reply_text(part, parse_mode="Markdown")
+
+    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        _cache_chat_id(uid)
+        _histories[uid] = deque(maxlen=MAX_HISTORY)
+        await send(update, f"Jarvis online. I'm {OWNER}'s personal AI assistant.\n\n{HELP_TEXT}")
+
+    async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, HELP_TEXT)
+
+    async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, get_stats())
+
+    async def health_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, get_health())
+
+    async def sysinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.chat.send_action("typing")
+        await send(update, get_sysinfo())
+
+    async def index_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, "Indexing started, this may take a few minutes...")
+        await send(update, trigger_index())
+
+    async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        _histories[uid] = deque(maxlen=MAX_HISTORY)
+        _save_histories()
+        await send(update, "Conversation history cleared.")
+
+    async def remember_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Save an explicit fact: /remember key value  or  /remember value (saves as preference)"""
+        text = " ".join(context.args).strip() if context.args else ""
+        if not text:
+            await send(update, "Usage: /remember KEY VALUE\nExample: /remember editor vim")
+            return
+        parts = text.split(None, 1)
+        if len(parts) == 2:
+            key = re.sub(r"\s+", "_", parts[0].lower())
+            val = parts[1].strip()
+        else:
+            key = "preference"
+            val = parts[0].strip()
+        facts = load_facts()
+        facts[key] = val
+        save_facts(facts)
+        await send(update, f"Remembered: *{key}* = {val}")
+
+    async def actions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from executor import ACTIONS, AUTO, CONFIRM, APPROVE
+        lines = ["Available actions:\n"]
+        for tier, label in [(AUTO, "⚡ Auto"), (CONFIRM, "🔔 Confirm"), (APPROVE, "🔐 Approve")]:
+            items = [f"  `{k}` — {v['desc']}" for k, v in ACTIONS.items() if v["tier"] == tier]
+            if items:
+                lines.append(f"*{label}*")
+                lines.extend(items)
+        await send(update, "\n".join(lines))
+
+    async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from permissions import list_pending
+        pending = list_pending()
+        if not pending:
+            await send(update, "No pending approvals.")
+            return
+        lines = ["Pending approvals:"]
+        for req in pending:
+            lines.append(f"  `{req['id']}` — {req['description']}")
+        await send(update, "\n".join(lines))
+
+    async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        if not args:
+            await send(update, "Usage: /approve REQUEST_ID")
+            return
+        req_id = args[0].upper()
+        await update.message.chat.send_action("typing")
+        try:
+            resp = requests.post(f"{API_BASE}/approve/{req_id}", timeout=90)
+            d = resp.json()
+            output = d.get("output", "")
+            ok = d.get("success", True)
+            icon = "✅" if ok else "❌"
+            reply = f"{icon} Executed\n```\n{output[:2000]}\n```" if output else f"{icon} Done."
+            await send(update, reply)
+        except Exception as e:
+            await send(update, f"Error: {e}")
+
+    async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        if not args:
+            await send(update, "Usage: /deny REQUEST_ID")
+            return
+        req_id = args[0].upper()
+        try:
+            requests.post(f"{API_BASE}/deny/{req_id}", timeout=10)
+            await send(update, f"❌ Denied: {req_id}")
+        except Exception as e:
+            await send(update, f"Error: {e}")
+
+    async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data.startswith("good_"):
+            iid = data[5:]
+            _send_feedback(iid, "good")
+            await query.edit_message_text("👍 Noted. Jarvis will remember this.")
+        elif data.startswith("bad_"):
+            iid = data[4:]
+            _send_feedback(iid, "bad")
+            await query.edit_message_text("👎 Noted. Use /correct to tell Jarvis the right answer.")
+        elif data.startswith("approve_"):
+            req_id = data.split("_", 1)[1]
+            try:
+                resp = requests.post(f"{API_BASE}/approve/{req_id}", timeout=90)
+                d = resp.json()
+                output = d.get("output", "")
+                ok = d.get("success", True)
+                icon = "✅" if ok else "❌"
+                reply = f"{icon} Done\n```\n{output[:1500]}\n```" if output else f"{icon} Done."
+                await query.edit_message_text(reply, parse_mode="Markdown")
+            except Exception as e:
+                await query.edit_message_text(f"Error: {e}")
+        elif data.startswith("deny_"):
+            req_id = data.split("_", 1)[1]
+            try:
+                requests.post(f"{API_BASE}/deny/{req_id}", timeout=10)
+                await query.edit_message_text(f"❌ Denied")
+            except Exception as e:
+                await query.edit_message_text(f"Error: {e}")
+
+    def _feedback_keyboard(iid: str) -> "InlineKeyboardMarkup":
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("👍", callback_data=f"good_{iid}"),
+            InlineKeyboardButton("👎", callback_data=f"bad_{iid}"),
+        ]])
+
+    def _send_feedback(iid: str, rating: str) -> bool:
+        try:
+            r = requests.post(f"{API_BASE}/feedback", json={"interaction_id": iid, "rating": rating}, timeout=5)
+            return r.ok
+        except Exception:
+            return False
+
+    async def voice_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        arg = (context.args[0].lower() if context.args else "").strip()
+        if arg == "on":
+            _voice_mode[uid] = True
+            _save_voice_prefs()
+            await send(update, "Voice responses ON. Jarvis will send audio after each reply.")
+        elif arg == "off":
+            _voice_mode[uid] = False
+            _save_voice_prefs()
+            await send(update, "Voice responses OFF.")
+        else:
+            state = "ON" if _is_voice_on(uid) else "OFF"
+            await send(update, f"Voice mode is {state}.\nUsage: /voice on | /voice off")
+
+    async def correct_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        correction = " ".join(context.args).strip() if context.args else ""
+        if not correction:
+            await send(update, "Usage: /correct <what Jarvis should have said>")
+            return
+        iid = _last_interaction.get(uid)
+        if not iid:
+            await send(update, "No recent response to correct.")
+            return
+        try:
+            r = requests.post(f"{API_BASE}/correct", json={"interaction_id": iid, "correction": correction}, timeout=5)
+            if r.ok:
+                await send(update, f"Correction saved. Jarvis will learn from this.")
+            else:
+                await send(update, "Could not save correction.")
+        except Exception as e:
+            await send(update, f"Error: {e}")
+
+    async def learn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, "Running brain training in background...")
+        try:
+            r = requests.post(f"{API_BASE}/learn", timeout=10)
+            if r.ok:
+                await send(update, "Brain training started. Check /stats in a minute.")
+            else:
+                await send(update, f"Error: {r.text}")
+        except Exception as e:
+            await send(update, f"Error: {e}")
+
+    async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await send(update, "Running full system self-check...")
+        try:
+            r = requests.get(f"{API_BASE}/selfcheck", timeout=20)
+            r.raise_for_status()
+            d = r.json()
+            overall = d.get("overall", "unknown")
+            emoji = "✅" if overall == "ok" else "⚠️"
+            lines = [f"{emoji} *Jarvis Self-Check* — {overall.upper()}\n"]
+            for k, v in d.get("checks", {}).items():
+                icon = "✅" if str(v) in ("ok", "True") else ("⚠️" if str(v).isdigit() else "❌")
+                lines.append(f"{icon} `{k}`: {v}")
+            issues = d.get("issues", [])
+            if issues:
+                lines.append("\n*Issues:*")
+                for iss in issues:
+                    lines.append(f"  • {iss}")
+            await send(update, "\n".join(lines))
+        except Exception as e:
+            await send(update, f"Self-check failed: {e}")
+
+    async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        _cache_chat_id(uid)
+        caption = (update.message.caption or "").strip() or "Describe this image in detail."
+        thinking_msg = await update.message.reply_text("🔍 Analyzing image with llava:7b...")
+        try:
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+            await file.download_to_drive(tmp_path)
+            with open(tmp_path, "rb") as f:
+                img_bytes = f.read()
+            Path(tmp_path).unlink(missing_ok=True)
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(None, analyze_image_sync, img_bytes, caption)
+            add_to_history(uid, "user", f"[Image] {caption}")
+            add_to_history(uid, "assistant", answer)
+            _trigger_training_if_due()
+            for i, part in enumerate(split_message(answer)):
+                if i == 0:
+                    await thinking_msg.edit_text(part, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(part, parse_mode="Markdown")
+        except Exception as e:
+            log.error(f"Photo analysis error: {e}")
+            await thinking_msg.edit_text(f"Image analysis failed: {e}")
+
+    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        text = update.message.text.strip()
+        if not text:
+            return
+        _cache_chat_id(uid)
+
+        # Check if it's an action command first (fast path, no LLM needed)
+        from executor import detect_action, ACTIONS, AUTO, CONFIRM, APPROVE
+        action = detect_action(text)
+        if action:
+            entry = ACTIONS[action]
+            tier = entry["tier"]
+            if tier == AUTO:
+                await update.message.chat.send_action("typing")
+                result_text = run_action_via_api(action)
+                await send(update, result_text)
+                return
+            elif tier in (CONFIRM, APPROVE):
+                tier_label = "⚡" if tier == CONFIRM else "🔐"
+                msg = f"{tier_label} *{entry['desc']}*\n\nConfirm?"
+                try:
+                    resp = requests.post(
+                        f"{API_BASE}/action",
+                        json={"action": action, "arg": ""},
+                        timeout=10,
+                    )
+                    d = resp.json()
+                    req_id = d.get("request_id", "")
+                    keyboard = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("✅ Yes", callback_data=f"approve_{req_id}"),
+                            InlineKeyboardButton("❌ No",  callback_data=f"deny_{req_id}"),
+                        ]
+                    ])
+                    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="Markdown")
+                except Exception:
+                    await send(update, run_action_via_api(action))
+                return
+
+        # LLM query — send a placeholder first so user sees immediate feedback
+        _trigger_training_if_due()
+        thinking_msg = await update.message.reply_text("⏳")
+        try:
+            response, iid = query_jarvis(uid, text)
+            if iid:
+                _last_interaction[uid] = iid
+            parts = split_message(response)
+            for i, part in enumerate(parts):
+                if i == 0:
+                    await thinking_msg.edit_text(part, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text(part, parse_mode="Markdown")
+            # Show feedback buttons after the last part (only for logged interactions)
+            if iid:
+                await update.message.reply_text(
+                    "Rate this response:",
+                    reply_markup=_feedback_keyboard(iid),
+                )
+            # Send voice response if voice mode is on
+            if _is_voice_on(uid) and response and not response.startswith("Error"):
+                import asyncio as _asyncio
+                _asyncio.get_event_loop().run_in_executor(None, _send_voice_for_response, response)
+        except Exception as e:
+            await thinking_msg.edit_text(f"Error: {e}")
+
+    async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+        log.error(f"Telegram error: {context.error}")
+
+    app_bot = Application.builder().token(token).build()
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("help", help_cmd))
+    app_bot.add_handler(CommandHandler("stats", stats_cmd))
+    app_bot.add_handler(CommandHandler("health", health_cmd))
+    app_bot.add_handler(CommandHandler("sysinfo", sysinfo_cmd))
+    app_bot.add_handler(CommandHandler("systeminfo", sysinfo_cmd))
+    app_bot.add_handler(CommandHandler("index", index_cmd))
+    app_bot.add_handler(CommandHandler("clear", clear_cmd))
+    app_bot.add_handler(CommandHandler("remember", remember_cmd))
+    app_bot.add_handler(CommandHandler("voice", voice_cmd))
+    app_bot.add_handler(CommandHandler("correct", correct_cmd))
+    app_bot.add_handler(CommandHandler("learn", learn_cmd))
+    app_bot.add_handler(CommandHandler("selfcheck", selfcheck_cmd))
+    app_bot.add_handler(CommandHandler("actions", actions_cmd))
+    app_bot.add_handler(CommandHandler("pending", pending_cmd))
+    app_bot.add_handler(CommandHandler("approve", approve_cmd))
+    app_bot.add_handler(CommandHandler("deny", deny_cmd))
+    app_bot.add_handler(CallbackQueryHandler(button_callback))
+    app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app_bot.add_error_handler(error_handler)
+
+    log.info(f"Jarvis Telegram bot starting (API: {API_BASE})")
+    app_bot.run_polling(allowed_updates=["message", "callback_query"])
+
+
+if __name__ == "__main__":
+    main()

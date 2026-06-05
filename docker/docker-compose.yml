@@ -1,0 +1,82 @@
+# Jarvis microservices — API, Telegram bot, optional indexer jobs.
+# Ollama stays on the host by default (GPU). Use docker-compose.ollama.yml to bundle it.
+name: jarvis
+
+x-jarvis-app: &jarvis-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: jarvis-app:1.0
+  security_opt:
+    - seccomp:unconfined
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  environment: &jarvis-env
+    JARVIS_HOME: /home/kali/.jarvis
+    OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+  volumes: &jarvis-volumes
+    - ${JARVIS_HOME:-/home/kali/.jarvis}:/home/kali/.jarvis
+    - ${PROJECTS_DIR:-/home/kali/Projects}:/home/kali/Projects:ro
+    - ${SHELL_HISTORY:-/home/kali/.zsh_history}:/home/kali/.zsh_history:ro
+  networks:
+    - jarvis-net
+
+services:
+  jarvis-api:
+    <<: *jarvis-app
+    container_name: jarvis-api
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["python3", "/home/kali/.jarvis/api.py"]
+    ports:
+      - "${API_PORT:-8181}:8181"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8181/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+
+  jarvis-telegram:
+    <<: *jarvis-app
+    container_name: jarvis-telegram
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["python3", "/home/kali/.jarvis/telegram_bot.py"]
+    environment:
+      <<: *jarvis-env
+      JARVIS_API_URL: http://jarvis-api:8181
+    depends_on:
+      jarvis-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot: docker compose run --rm jarvis-indexer
+  jarvis-indexer:
+    <<: *jarvis-app
+    profiles: ["tools"]
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["python3", "/home/kali/.jarvis/indexer.py", "--now"]
+    restart: "no"
+
+  # Weekly re-index: docker compose run --rm jarvis-train
+  jarvis-train:
+    <<: *jarvis-app
+    profiles: ["tools"]
+    user: "${UID:-1000}:${GID:-1000}"
+    command:
+      [
+        "/bin/bash",
+        "-c",
+        "python3 /home/kali/.jarvis/indexer.py --now && python3 /home/kali/.jarvis/indexer.py --stats",
+      ]
+    restart: "no"
+
+networks:
+  jarvis-net:
+    driver: bridge
