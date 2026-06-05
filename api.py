@@ -187,6 +187,51 @@ def is_casual(query: str) -> bool:
     return q in CASUAL_PATTERNS or (len(q.split()) <= 3 and any(p in q for p in CASUAL_PATTERNS))
 
 
+# Known Jarvis concepts — terms the LLM is expected to know about
+_KNOWN_TERMS = {
+    "jarvis", "ollama", "pm2", "nginx", "vps", "chromadb",
+    "deepseek", "phi4", "qwen", "starline", "asthacash",
+    "payment-gateway", "payment", "gateway", "telegram",
+    "monitor", "executor", "healer", "syncer", "learner",
+    "indexer", "docker", "ubuntu", "kali", "linux", "python",
+    "fastapi", "react", "node", "nodejs", "postgresql", "pnpm",
+    "tailscale", "github", "git", "openai", "anthropic", "claude",
+    "conztru", "nvida", "nvidia", "cuda", "ollama",
+}
+
+
+def _contains_unknown_proper_noun(query: str) -> str | None:
+    """Return the first unknown capitalised proper noun in a short query, or None.
+
+    A term is considered unknown if:
+    - The original query has ≤ 6 words
+    - The token starts with an uppercase letter (or is ALL-CAPS) in the original query
+    - It is not a known Jarvis concept (case-insensitive)
+    - It is not the first word of the query (first word is capitalised by grammar)
+    """
+    words = query.split()
+    if len(words) > 6:
+        return None
+    for i, word in enumerate(words):
+        # Strip punctuation from ends
+        import re as _re
+        clean = _re.sub(r"[^A-Za-z0-9_\-]", "", word)
+        if not clean:
+            continue
+        # Skip first word (capitalised by convention) unless ALL-CAPS and ≥ 3 chars
+        if i == 0 and not (clean.isupper() and len(clean) >= 3):
+            continue
+        # Must start with uppercase or be all-caps
+        if not (clean[0].isupper() or clean.isupper()):
+            continue
+        # Skip short words that are likely acronyms for common things (I, OK, etc.)
+        if len(clean) <= 2:
+            continue
+        if clean.lower() not in _KNOWN_TERMS:
+            return clean
+    return None
+
+
 def route_model(query: str, override: str | None = None) -> str:
     """Pick the best available model for the query type."""
     if override:
@@ -332,12 +377,16 @@ def build_system_prompt(ctx_block: str = "") -> str:
         f"6. Elaborate only when the question genuinely requires detail.\n"
         f"7. When discussing AsthaCash or Starline, reference the actual code paths and stack.\n"
         f"8. When Mike asks to restart or fix something, recommend or use the Jarvis action system.\n"
-        # 5. RAG context last (grounding, not identity)
+        # 6. Hard anti-hallucination rule — must be last so it isn't overridden
+        f"IMPORTANT: If you do not recognise a specific tool, product, or framework name in the user's query, "
+        f"respond with exactly: 'I don't recognise [name]. Did you mean something else?' — "
+        f"never invent information about it.\n"
+        # 7. RAG context last (grounding, not identity)
         f"{rag_section}"
     )
 
 
-def build_messages(query, context_chunks, history=None):
+def build_messages(query, context_chunks, history=None, unknown_term: str | None = None):
     ctx_block = ""
     if context_chunks:
         parts = []
@@ -355,6 +404,16 @@ def build_messages(query, context_chunks, history=None):
         ctx_block = "\n\n".join(parts)
 
     system = build_system_prompt(ctx_block)
+
+    # Inject unknown-term warning directly into system prompt so the model
+    # sees it as a hard instruction rather than just part of the user turn.
+    if unknown_term:
+        system += (
+            f"\n\nWARNING: The user's query contains the term '{unknown_term}' which is "
+            f"not a recognised Jarvis concept, product, or technology. "
+            f"Do NOT invent information about it. "
+            f"If you do not recognise it, say so in one sentence."
+        )
 
     messages = [{"role": "system", "content": system}]
     if history:
@@ -423,8 +482,8 @@ def query(req: QueryRequest):
     history = [{"role": m.role, "content": m.content} for m in req.history] if req.history else None
     messages = build_messages(req.query, context, history)
 
-    # Tune temperature by query type
-    temp = 0.3 if is_casual(req.query) or len(req.query.split()) <= 8 else 0.6
+    # Tune temperature by query type — keep low to reduce hallucination
+    temp = 0.3
 
     opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 2048}
     try:
@@ -1051,7 +1110,7 @@ def openclaw_webhook(payload: WebhookPayload):
         messages = build_messages(payload.text, context)
         try:
             resp = ollama.chat(model=PRIMARY_MODEL, messages=messages,
-                               options={"temperature": 0.7, "num_predict": 512, "num_ctx": 2048})
+                               options={"temperature": 0.3, "num_predict": 512, "num_ctx": 2048})
             answer = resp["message"]["content"].strip()
             _send_telegram_direct(f"📡 OpenClaw: {payload.text}\n\n{answer}")
             return {"response": answer}

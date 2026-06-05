@@ -108,6 +108,14 @@ preferences:
   project_references: when discussing a project, reference its actual code path and stack
   action_system: when Mike asks to restart or fix something, use Jarvis action system (/action endpoint)
 
+response_style:
+  max_sentences: 5
+  no_hallucination: true
+  no_section_headers: true
+  max_bullets: 3
+  stats_and_sysinfo: "say 'checking...' and defer to fast-path routing — never generate fake numbers"
+  unknown_terms: "respond with exactly: 'I don't recognise [name]. Did you mean something else?' — never invent information"
+
 work_patterns:
   primary_tools: [Claude Code, Cursor, Git, Telegram]
   vcs: Git (GitHub)
