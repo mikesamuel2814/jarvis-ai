@@ -12,7 +12,23 @@ import re
 from pathlib import Path
 
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+def _load_api_key() -> str:
+    """Read ANTHROPIC_API_KEY from env or ~/.jarvis/config/credentials.yaml."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if key:
+        return key
+    creds_file = JARVIS_HOME / "config" / "credentials.yaml"
+    if creds_file.exists():
+        try:
+            import yaml
+            creds = yaml.safe_load(creds_file.read_text()) or {}
+            return creds.get("anthropic_api_key", "")
+        except Exception:
+            pass
+    return ""
+
+ANTHROPIC_API_KEY = _load_api_key()
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
