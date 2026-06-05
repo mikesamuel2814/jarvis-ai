@@ -72,11 +72,40 @@ ACTIONS: dict[str, dict] = {
     "restart_gateway":   {"desc": "Restart AsthaCash gateway backend on VPS", "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart gateway-backend 2>&1'",                                      "tier": CONFIRM},
     "restart_starline":  {"desc": "Restart Starline API server on VPS",    "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart api-server 2>&1'",                                              "tier": CONFIRM},
 
+    # ── File & project read-only (auto) ─────────────────────────────────────
+    "file_read":         {"desc": "Read a file (path as arg)",     "cmd": None,                                                  "tier": AUTO},
+    "file_list":         {"desc": "List a directory (path as arg)","cmd": None,                                                  "tier": AUTO},
+    "project_status":    {"desc": "Status of both projects (PM2 + git)", "cmd": None,                                           "tier": AUTO},
+    "vps_disk":          {"desc": "VPS disk usage",                "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'df -h'",                                                                              "tier": AUTO},
+    "vps_free":          {"desc": "VPS RAM usage",                 "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'free -h'",                                                                            "tier": AUTO},
+    "vps_ps":            {"desc": "VPS running processes",         "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'ps aux --sort=-%cpu | head -20'",                                                     "tier": AUTO},
+    "git_log_gw":        {"desc": "Recent commits in Payment-Gateway", "cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway log --oneline -15",                                                              "tier": AUTO},
+    "git_log_sl":        {"desc": "Recent commits in Starline",    "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web log --oneline -15",                                                               "tier": AUTO},
+    "git_diff_gw":       {"desc": "Unstaged changes in Payment-Gateway","cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway diff --stat",                                                                    "tier": AUTO},
+    "git_diff_sl":       {"desc": "Unstaged changes in Starline",  "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web diff --stat",                                                                     "tier": AUTO},
+    "vps_nginx_logs":    {"desc": "VPS Nginx error logs",          "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'tail -30 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx -n 30 --no-pager'", "tier": AUTO},
+    "vps_services":      {"desc": "VPS systemd services status",   "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl list-units --type=service --state=running --no-pager | head -20'",         "tier": AUTO},
+
+    # ── Local project builds (confirm) ───────────────────────────────────────
+    "git_pull_gw":       {"desc": "git pull Payment-Gateway",      "cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway pull",                                                                               "tier": CONFIRM},
+    "git_pull_sl":       {"desc": "git pull Starline-Final-web",   "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web pull",                                                                            "tier": CONFIRM},
+    "npm_install_gw":    {"desc": "npm install gateway-admin",     "cmd": "cd /home/kali/Projects/kalimike/Payment-Gateway/gateway-admin && npm install --legacy-peer-deps",                                        "tier": CONFIRM},
+    "pnpm_install_sl":   {"desc": "pnpm install Starline",         "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm install",                                                                     "tier": CONFIRM},
+    "npm_build_gw":      {"desc": "npm build gateway-admin",       "cmd": "cd /home/kali/Projects/kalimike/Payment-Gateway/gateway-admin && npm run build",                                                         "tier": CONFIRM},
+    "pnpm_build_sl":     {"desc": "pnpm build Starline frontend",  "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm run build",                                                                   "tier": CONFIRM},
+
+    # ── VPS management (confirm) ─────────────────────────────────────────────
+    "vps_git_pull_gw":   {"desc": "git pull Payment-Gateway on VPS","cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Payment-Gateway && git pull 2>&1'",                                          "tier": CONFIRM},
+    "vps_git_pull_sl":   {"desc": "git pull Starline on VPS",      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Starline-Final-web && git pull 2>&1'",                                        "tier": CONFIRM},
+    "vps_restart_nginx": {"desc": "Restart Nginx on VPS",          "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'sudo systemctl restart nginx 2>&1'",                                               "tier": CONFIRM},
+    "restart_jarvis_sync":{"desc":"Restart jarvis-sync service",   "cmd": "sudo systemctl restart jarvis-sync",                                                                                                      "tier": CONFIRM},
+
     # ── High risk (approve) ───────────────────────────────────────────────────
     "deploy_vps":        {"desc": "Deploy to VPS (git pull + pm2 restart)", "cmd": None,                                        "tier": APPROVE},
     "ssh_cmd":           {"desc": "Run command on VPS via SSH",    "cmd": None,                                                  "tier": APPROVE},
     "shell":             {"desc": "Run arbitrary shell command",   "cmd": None,                                                  "tier": APPROVE},
-    "claude_task":       {"desc": "Run a Claude Code task",        "cmd": None,                                                  "tier": APPROVE},
+    "claude_task":       {"desc": "Run a Claude Code task (background, results via Telegram)", "cmd": None,                     "tier": APPROVE},
+    "file_write":        {"desc": "Write content to a local file (path:content as arg)",       "cmd": None,                     "tier": APPROVE},
     "reboot":            {"desc": "Reboot Kali machine",           "cmd": "sudo reboot",                                        "tier": APPROVE},
     "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo apt update && sudo apt upgrade -y",             "tier": APPROVE},
 }
@@ -122,6 +151,30 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["restart gateway", "restart asthacash", "restart payment"],                  "restart_gateway"),
     (["restart starline", "restart real estate", "restart api server"],            "restart_starline"),
     (["nginx status", "nginx test", "web server status"],                          "nginx_status"),
+
+    # ── New extended actions ──────────────────────────────────────────────────
+    (["read file", "cat file", "show file", "view file"],                         "file_read"),
+    (["list files", "list directory", "ls "],                                     "file_list"),
+    (["project status", "both projects", "all projects status"],                  "project_status"),
+    (["vps disk", "vps storage", "vps space"],                                    "vps_disk"),
+    (["vps memory", "vps ram", "vps free"],                                       "vps_free"),
+    (["vps ps", "vps processes"],                                                 "vps_ps"),
+    (["git log gateway", "gateway commits", "gw log"],                            "git_log_gw"),
+    (["git log starline", "starline commits", "sl log"],                          "git_log_sl"),
+    (["git diff gateway", "gateway changes"],                                     "git_diff_gw"),
+    (["git diff starline", "starline changes"],                                   "git_diff_sl"),
+    (["vps nginx logs", "nginx error logs"],                                      "vps_nginx_logs"),
+    (["vps services", "vps systemd"],                                             "vps_services"),
+    (["git pull gateway", "pull gateway"],                                        "git_pull_gw"),
+    (["git pull starline", "pull starline"],                                      "git_pull_sl"),
+    (["npm install gateway", "install gateway deps"],                             "npm_install_gw"),
+    (["pnpm install starline", "install starline deps"],                          "pnpm_install_sl"),
+    (["build gateway", "npm build gateway"],                                      "npm_build_gw"),
+    (["build starline", "pnpm build starline"],                                   "pnpm_build_sl"),
+    (["vps git pull gateway", "deploy gateway"],                                  "vps_git_pull_gw"),
+    (["vps git pull starline", "deploy starline"],                                "vps_git_pull_sl"),
+    (["restart nginx", "nginx restart"],                                          "vps_restart_nginx"),
+    (["restart syncer", "restart jarvis-sync", "restart sync"],                  "restart_jarvis_sync"),
 ]
 
 # Regex patterns for commands that need arg extraction
@@ -200,6 +253,14 @@ def run_action(action_name: str, arg: str = "") -> dict:
             return _run_claude_task(arg)
         if action_name == "clear_history":
             return _clear_history()
+        if action_name == "file_read":
+            return _file_read(arg)
+        if action_name == "file_list":
+            return _file_list(arg)
+        if action_name == "file_write":
+            return _file_write(arg)
+        if action_name == "project_status":
+            return _project_status()
         if entry["cmd"]:
             cmd = entry["cmd"]
             if "{arg}" in cmd:
@@ -216,31 +277,6 @@ def run_action(action_name: str, arg: str = "") -> dict:
         return {"success": False, "output": str(e), "action": action_name, "tier": tier}
 
     return {"success": False, "output": "No command defined.", "action": action_name, "tier": tier}
-
-
-def _run_claude_task(task: str) -> dict:
-    if not task:
-        return {"success": False, "output": "No task specified.", "action": "claude_task"}
-    claude_bin = "/home/kali/.local/bin/claude"
-    if not Path(claude_bin).exists():
-        claude_bin = "claude"
-    env = {**os.environ, "HOME": "/home/kali", "PATH": f"/home/kali/.local/bin:{os.environ.get('PATH','')}"}
-
-    # Handle raw "claude <args>" passthrough (e.g. "claude --resume UUID")
-    if task.lower().startswith("claude "):
-        args_part = task[7:].strip()
-        cmd = [claude_bin] + shlex.split(args_part)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
-                                cwd="/home/kali", env=env)
-    else:
-        result = subprocess.run(
-            [claude_bin, "-p", "--dangerously-skip-permissions", task],
-            capture_output=True, text=True, timeout=300,
-            cwd="/home/kali/Projects", env=env,
-        )
-    output = (result.stdout + result.stderr).strip()
-    _audit(f"CLAUDE_TASK done exit={result.returncode} task={task[:80]!r}")
-    return {"success": result.returncode == 0, "output": output[:3000], "action": "claude_task"}
 
 
 def _deploy_vps(repo: str = "") -> dict:
@@ -290,6 +326,132 @@ def _clear_history() -> dict:
     hist = JARVIS_HOME / "data" / "telegram_history.json"
     hist.write_text("{}")
     return {"success": True, "output": "Conversation history cleared.", "action": "clear_history"}
+
+
+_SAFE_ROOTS = [
+    Path.home() / ".jarvis",
+    Path.home() / "Projects",
+    Path("/var/log"),
+    Path("/tmp"),
+]
+
+
+def _is_safe_path(p: Path) -> bool:
+    try:
+        r = p.resolve()
+        return any(r == root.resolve() or root.resolve() in r.parents for root in _SAFE_ROOTS)
+    except Exception:
+        return False
+
+
+def _file_read(path_arg: str) -> dict:
+    if not path_arg:
+        return {"success": False, "output": "No path given.", "action": "file_read"}
+    p = Path(path_arg.strip()).expanduser()
+    if not _is_safe_path(p):
+        return {"success": False, "output": f"Path not in allowed roots: {p}", "action": "file_read"}
+    if not p.exists():
+        return {"success": False, "output": f"File not found: {p}", "action": "file_read"}
+    if p.is_dir():
+        return _file_list(path_arg)
+    try:
+        content = p.read_text(errors="replace")[:4000]
+        return {"success": True, "output": content, "action": "file_read"}
+    except Exception as e:
+        return {"success": False, "output": str(e), "action": "file_read"}
+
+
+def _file_list(path_arg: str) -> dict:
+    target = Path(path_arg.strip() if path_arg else ".").expanduser()
+    if not _is_safe_path(target) and str(target) != ".":
+        return {"success": False, "output": f"Path not in allowed roots: {target}", "action": "file_list"}
+    r = subprocess.run(f"ls -la {shlex.quote(str(target))}", shell=True,
+                       capture_output=True, text=True, timeout=10)
+    return {"success": r.returncode == 0, "output": (r.stdout + r.stderr).strip()[:2000], "action": "file_list"}
+
+
+def _file_write(arg: str) -> dict:
+    """arg format: 'path::content' (double colon separator)"""
+    if "::" not in arg:
+        return {"success": False, "output": "Format: path::content", "action": "file_write"}
+    path_str, content = arg.split("::", 1)
+    p = Path(path_str.strip()).expanduser()
+    if not _is_safe_path(p):
+        return {"success": False, "output": f"Path not in allowed roots: {p}", "action": "file_write"}
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+        return {"success": True, "output": f"Written {len(content)} chars to {p}", "action": "file_write"}
+    except Exception as e:
+        return {"success": False, "output": str(e), "action": "file_write"}
+
+
+def _project_status() -> dict:
+    lines = []
+    # PM2 status
+    pm2 = subprocess.run(
+        "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 list 2>&1 | head -20'",
+        shell=True, capture_output=True, text=True, timeout=15,
+    )
+    lines.append("=== VPS PM2 ===\n" + (pm2.stdout + pm2.stderr).strip()[:500])
+    # Local git status
+    for proj, path in [("Payment-Gateway", "/home/kali/Projects/kalimike/Payment-Gateway"),
+                        ("Starline", "/home/kali/Projects/kalimike/Starline-Final-web")]:
+        g = subprocess.run(f"git -C {path} status --short",
+                           shell=True, capture_output=True, text=True, timeout=10)
+        out = (g.stdout + g.stderr).strip() or "(clean)"
+        lines.append(f"=== {proj} git ===\n{out[:300]}")
+    return {"success": True, "output": "\n\n".join(lines), "action": "project_status"}
+
+
+def _run_claude_task(task: str) -> dict:
+    if not task:
+        return {"success": False, "output": "No task specified.", "action": "claude_task"}
+    claude_bin = "/home/kali/.local/bin/claude"
+    if not Path(claude_bin).exists():
+        claude_bin = "claude"
+    env = {**os.environ, "HOME": "/home/kali",
+           "PATH": f"/home/kali/.local/bin:{os.environ.get('PATH','')}",
+           "MALLOC_ARENA_MAX": "2"}
+
+    import threading
+
+    def _bg_run(task_desc: str):
+        try:
+            if task_desc.lower().startswith("claude "):
+                args_part = task_desc[7:].strip()
+                cmd = [claude_bin] + shlex.split(args_part)
+                cwd = "/home/kali"
+            else:
+                cmd = [claude_bin, "-p", "--dangerously-skip-permissions", task_desc]
+                cwd = "/home/kali/Projects"
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600, cwd=cwd, env=env)
+            output = (r.stdout + r.stderr).strip()[:3000]
+            _audit(f"CLAUDE_TASK done exit={r.returncode} task={task_desc[:80]!r}")
+            # Notify via Telegram
+            try:
+                import requests as _req
+                icon = "✅" if r.returncode == 0 else "❌"
+                msg = f"{icon} Claude task done:\n_{task_desc[:100]}_\n\n```\n{output[:2000]}\n```"
+                _req.post("http://localhost:8181/telegram/send",
+                          json={"text": msg, "parse_mode": "Markdown"}, timeout=10)
+            except Exception:
+                pass
+        except subprocess.TimeoutExpired:
+            _audit(f"CLAUDE_TASK TIMEOUT task={task_desc[:80]!r}")
+            try:
+                import requests as _req
+                _req.post("http://localhost:8181/telegram/send",
+                          json={"text": f"⏱ Claude task timed out:\n_{task_desc[:100]}_"}, timeout=10)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_bg_run, args=(task,), daemon=True)
+    t.start()
+    _audit(f"CLAUDE_TASK started task={task[:80]!r}")
+    return {"success": True,
+            "output": f"Claude task started in background. Results will be sent via Telegram.\nTask: {task[:200]}",
+            "action": "claude_task"}
 
 
 def _audit(msg: str):
