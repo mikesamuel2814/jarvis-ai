@@ -749,6 +749,124 @@ def main():
             except Exception as e:
                 await query.edit_message_text(f"Error: {e}")
 
+        elif data.startswith("cmd_"):
+            cmd = data[4:]
+            if cmd == "stats":
+                reply = get_stats()
+            elif cmd == "sysinfo":
+                reply = get_sysinfo()
+            elif cmd == "health":
+                reply = get_health()
+            elif cmd == "selfcheck":
+                try:
+                    d = requests.get(f"{API_BASE}/selfcheck", timeout=20).json()
+                    overall = d.get("overall", "unknown")
+                    icon = "✅" if overall == "ok" else "⚠️"
+                    lines = [f"{icon} *Jarvis Self-Check* — {overall.upper()}\n"]
+                    for k, v in d.get("checks", {}).items():
+                        ci = "✅" if str(v) in ("ok", "True") else ("⚠️" if str(v).isdigit() else "❌")
+                        lines.append(f"{ci} `{k}`: {v}")
+                    reply = "\n".join(lines)
+                except Exception as e:
+                    reply = f"Self-check failed: {e}"
+            elif cmd == "learn":
+                try:
+                    requests.post(f"{API_BASE}/learn", timeout=10)
+                    reply = "🧠 Brain training started. Check /stats in a minute."
+                except Exception as e:
+                    reply = f"Error: {e}"
+            elif cmd == "index":
+                reply = "🔄 Indexing started..."
+                await query.message.reply_text(reply)
+                reply = trigger_index()
+            elif cmd == "actions":
+                from executor import ACTIONS, AUTO, CONFIRM, APPROVE
+                auto = [k for k, v in ACTIONS.items() if v["tier"] == AUTO]
+                conf = [k for k, v in ACTIONS.items() if v["tier"] == CONFIRM]
+                appr = [k for k, v in ACTIONS.items() if v["tier"] == APPROVE]
+                reply = (f"*Actions ({len(ACTIONS)} total)*\n\n"
+                         f"*⚡ AUTO ({len(auto)})*\n" + "  ".join(f"`{a}`" for a in auto) + "\n\n"
+                         f"*🔔 CONFIRM ({len(conf)})*\n" + "  ".join(f"`{a}`" for a in conf) + "\n\n"
+                         f"*🔐 APPROVE ({len(appr)})*\n" + "  ".join(f"`{a}`" for a in appr))
+            elif cmd == "pending":
+                try:
+                    d = requests.get(f"{API_BASE}/pending", timeout=10).json() if hasattr(requests, 'x') else None
+                    import json as _j, pathlib as _p
+                    pf = _p.Path("/home/kali/.jarvis/data/pending_approvals.json")
+                    pending = _j.loads(pf.read_text()) if pf.exists() else {}
+                    if pending:
+                        lines = ["*Pending Approvals*\n"]
+                        for rid, req in pending.items():
+                            lines.append(f"• `{rid}` — {req.get('action', '?')}")
+                        reply = "\n".join(lines)
+                    else:
+                        reply = "No pending approvals."
+                except Exception as e:
+                    reply = f"Error: {e}"
+            else:
+                reply = f"Unknown command: {cmd}"
+            await query.message.reply_text(_to_legacy_markdown(reply), parse_mode="Markdown")
+
+        elif data.startswith("act_"):
+            action = data[4:]
+            await query.message.chat.send_action("typing")
+            result = run_action_via_api(action)
+            await query.message.reply_text(_to_legacy_markdown(result), parse_mode="Markdown")
+
+    def _build_reference_keyboard() -> "InlineKeyboardMarkup":
+        B = InlineKeyboardButton
+        return InlineKeyboardMarkup([
+            # ── Commands ─────────────────────────────────────────────────────
+            [B("📊 Stats",    callback_data="cmd_stats"),
+             B("🖥 Sysinfo",  callback_data="cmd_sysinfo"),
+             B("❤️ Health",   callback_data="cmd_health"),
+             B("🔍 Selfcheck",callback_data="cmd_selfcheck")],
+            [B("📋 Actions",  callback_data="cmd_actions"),
+             B("⏳ Pending",  callback_data="cmd_pending"),
+             B("🧠 Learn",    callback_data="cmd_learn"),
+             B("🔄 Index",    callback_data="cmd_index")],
+            # ── AUTO: local system ────────────────────────────────────────────
+            [B("ps",     callback_data="act_ps"),
+             B("disk",   callback_data="act_disk"),
+             B("memory", callback_data="act_memory"),
+             B("uptime", callback_data="act_uptime")],
+            [B("gpu",      callback_data="act_gpu"),
+             B("services", callback_data="act_services"),
+             B("ports",    callback_data="act_ports"),
+             B("network",  callback_data="act_network")],
+            [B("top5 cpu",    callback_data="act_top5_cpu"),
+             B("top5 mem",    callback_data="act_top5_mem"),
+             B("tailscale",   callback_data="act_tailscale"),
+             B("AI models",   callback_data="act_ollama_models")],
+            [B("git status",     callback_data="act_git_status_all"),
+             B("nginx",          callback_data="act_nginx_status"),
+             B("pm2",            callback_data="act_pm2_status"),
+             B("jarvis logs",    callback_data="act_jarvis_logs_tail")],
+            # ── AUTO: projects ────────────────────────────────────────────────
+            [B("project status", callback_data="act_project_status"),
+             B("docker ps",      callback_data="act_docker_ps"),
+             B("vps disk",       callback_data="act_vps_disk"),
+             B("vps ps",         callback_data="act_vps_ps")],
+            [B("gw logs",   callback_data="act_pm2_logs_gateway"),
+             B("sl logs",   callback_data="act_pm2_logs_starline"),
+             B("git log gw",callback_data="act_git_log_gw"),
+             B("git log sl",callback_data="act_git_log_sl")],
+            # ── CONFIRM ───────────────────────────────────────────────────────
+            [B("🔔 restart jarvis",    callback_data="act_restart_jarvis"),
+             B("🔔 restart telegram",  callback_data="act_restart_telegram"),
+             B("🔔 restart ollama",    callback_data="act_restart_ollama")],
+            [B("🔔 reindex",           callback_data="act_reindex"),
+             B("🔔 pull gw",           callback_data="act_git_pull_gw"),
+             B("🔔 pull sl",           callback_data="act_git_pull_sl")],
+            [B("🔔 build gw",          callback_data="act_npm_build_gw"),
+             B("🔔 build sl",          callback_data="act_pnpm_build_sl"),
+             B("🔔 vps pull gw",       callback_data="act_vps_git_pull_gw")],
+            # ── APPROVE ───────────────────────────────────────────────────────
+            [B("🔐 deploy vps",  callback_data="act_deploy_vps"),
+             B("🔐 reboot",      callback_data="act_reboot"),
+             B("🔐 update sys",  callback_data="act_update_system")],
+        ])
+
     def _feedback_keyboard(iid: str) -> "InlineKeyboardMarkup":
         return InlineKeyboardMarkup([[
             InlineKeyboardButton("👍", callback_data=f"good_{iid}"),
