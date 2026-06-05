@@ -90,7 +90,7 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["disk space", "disk usage", "how much disk", "storage"],                     "disk"),
     (["memory usage", "ram usage", "how much ram", "show memory"],                 "memory"),
     (["uptime", "how long running", "system uptime"],                              "uptime"),
-    (["gpu status", "gpu usage", "show gpu", "nvidia"],                            "gpu"),
+    (["gpu status", "gpu usage", "show gpu", "nvidia", "gpu temp", "gpu temperature", "what is my gpu", "how hot is gpu"], "gpu"),
     (["open ports", "listening ports", "show ports"],                              "ports"),
     (["who is logged", "logged in users", "active users"],                         "who"),
     (["running services", "list services", "show services"],                       "services"),
