@@ -168,4 +168,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--once" in sys.argv:
+        # One-shot mode for cron: commit + push if anything changed
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        sync()
+    else:
+        main()
