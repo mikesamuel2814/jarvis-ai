@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+*.egg-info/
+
+# Jarvis runtime data — never commit
+data/
+memory/
+logs/
+models/
+training/
+memory.bak*/
+
+# Secrets
+config/telegram.json
+
+# OS / IDE
+.DS_Store
+*.swp
+.vscode/
+.idea/
