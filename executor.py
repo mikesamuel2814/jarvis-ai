@@ -213,6 +213,10 @@ def detect_action(text: str) -> str | None:
     if tl in ACTION_ALIASES:
         return ACTION_ALIASES[tl]
 
+    # 2b. Exact action name match (e.g. user types "services", "gpu", "disk")
+    if tl in ACTIONS:
+        return tl
+
     # 3. Longest-phrase-wins across NL_MAP
     best_action: str | None = None
     best_len: int = 0
