@@ -6,9 +6,10 @@ Run every 5 min via cron: */5 * * * * /usr/bin/python3 /home/kali/.jarvis/monito
 
 import json
 import os
+import socket
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import psutil
@@ -19,12 +20,14 @@ JARVIS_HOME = Path.home() / ".jarvis"
 CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
 LOG_FILE = JARVIS_HOME / "logs" / "monitor.log"
 STATE_FILE = JARVIS_HOME / "data" / "monitor_state.json"
+INTERACTIONS_FILE = JARVIS_HOME / "data" / "interactions.jsonl"
 
 # Alert thresholds
 CPU_THRESHOLD = 85
 RAM_THRESHOLD = 85
 DISK_THRESHOLD = 90
 GPU_TEMP_THRESHOLD = 85
+LOG_SIZE_WARN_MB = 3
 
 
 def load_config() -> dict:
@@ -91,6 +94,84 @@ def send_telegram(msg: str, cfg: dict):
         log(f"Telegram send failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# 1. Jarvis uptime tracking
+# ---------------------------------------------------------------------------
+
+def check_jarvis_uptime(state: dict, alerts: list):
+    """Track jarvis.service uptime; warn if recently restarted."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "show", "jarvis", "--property=ActiveEnterTimestamp"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return
+        raw = r.stdout.strip()
+        # Format: ActiveEnterTimestamp=Thu 2025-01-01 00:00:00 UTC
+        if "=" not in raw:
+            return
+        ts_str = raw.split("=", 1)[1].strip()
+        if not ts_str or ts_str == "n/a":
+            return
+        # Parse timestamp — systemd format varies, try a few
+        for fmt in ("%a %Y-%m-%d %H:%M:%S %Z", "%a %Y-%m-%d %H:%M:%S"):
+            try:
+                restart_time = datetime.strptime(ts_str, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return
+
+        now = datetime.now()
+        minutes_up = int((now - restart_time).total_seconds() / 60)
+
+        # Store for daily summary
+        state["jarvis_uptime_minutes"] = minutes_up
+        state["jarvis_last_restart"] = ts_str
+
+        # Notify if within last 10 minutes and not already notified for this restart
+        last_notified = state.get("jarvis_restart_notified_ts", "")
+        if minutes_up <= 10 and last_notified != ts_str:
+            alerts.append(
+                f"ℹ️ Jarvis API restarted {minutes_up} minute{'s' if minutes_up != 1 else ''} ago (was down briefly)"
+            )
+            state["jarvis_restart_notified_ts"] = ts_str
+
+    except Exception as e:
+        log(f"Jarvis uptime check error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 2. Improved CPU/RAM alerts with top process
+# ---------------------------------------------------------------------------
+
+def get_top_cpu_process() -> str:
+    """Return name and CPU% of the top CPU-consuming process."""
+    try:
+        # First call seeds the cpu_percent counters
+        procs = list(psutil.process_iter(['name', 'cpu_percent', 'memory_percent']))
+        import time as _time
+        _time.sleep(0.3)
+        # Refresh
+        procs = list(psutil.process_iter(['name', 'cpu_percent', 'memory_percent']))
+        top = max(procs, key=lambda p: p.info.get('cpu_percent') or 0.0)
+        return f"{top.info['name']} ({top.info['cpu_percent']:.1f}%)"
+    except Exception:
+        return "unknown"
+
+
+def get_top_ram_process() -> str:
+    """Return name and RAM% of the top RAM-consuming process."""
+    try:
+        procs = list(psutil.process_iter(['name', 'memory_percent']))
+        top = max(procs, key=lambda p: p.info.get('memory_percent') or 0.0)
+        return f"{top.info['name']} ({top.info['memory_percent']:.1f}%)"
+    except Exception:
+        return "unknown"
+
+
 def check_kali(state: dict, alerts: list):
     """Check local Kali machine health."""
     try:
@@ -99,13 +180,15 @@ def check_kali(state: dict, alerts: list):
         disk = psutil.disk_usage("/").percent
 
         if cpu > CPU_THRESHOLD and state.get("cpu_alerted") != True:
-            alerts.append(f"⚠️ Kali CPU high: {cpu}%")
+            top = get_top_cpu_process()
+            alerts.append(f"⚠️ Kali CPU high: {cpu}% — Top process: {top}")
             state["cpu_alerted"] = True
         elif cpu <= CPU_THRESHOLD:
             state["cpu_alerted"] = False
 
         if ram > RAM_THRESHOLD and not state.get("ram_alerted"):
-            alerts.append(f"⚠️ Kali RAM high: {ram}%")
+            top = get_top_ram_process()
+            alerts.append(f"⚠️ Kali RAM high: {ram}% — Top process: {top}")
             state["ram_alerted"] = True
         elif ram <= RAM_THRESHOLD:
             state["ram_alerted"] = False
@@ -158,6 +241,210 @@ def check_services(state: dict, alerts: list):
             state[f"svc_down_{svc}"] = False
 
 
+# ---------------------------------------------------------------------------
+# 3. Ollama model load check
+# ---------------------------------------------------------------------------
+
+def check_ollama_model(state: dict, alerts: list):
+    """
+    If interactions.jsonl was modified recently, verify deepseek-r1:7b is
+    still loaded in Ollama.
+    """
+    try:
+        # Only check if interactions file touched in last 30 minutes
+        if INTERACTIONS_FILE.exists():
+            mtime = INTERACTIONS_FILE.stat().st_mtime
+            age_minutes = (datetime.now().timestamp() - mtime) / 60
+            if age_minutes > 30:
+                # No recent queries, skip check
+                return
+        else:
+            return
+
+        r = subprocess.run(
+            ["curl", "-s", "http://localhost:11434/api/tags"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            return
+
+        data = json.loads(r.stdout)
+        model_names = " ".join(m["name"] for m in data.get("models", []))
+        deepseek_loaded = "deepseek" in model_names
+
+        if not deepseek_loaded and not state.get("ollama_model_missing"):
+            alerts.append("⚠️ Ollama: deepseek-r1:7b is NOT loaded — model may have been evicted")
+            state["ollama_model_missing"] = True
+        elif deepseek_loaded:
+            state["ollama_model_missing"] = False
+
+    except Exception as e:
+        log(f"Ollama model check error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 4. Network connectivity check
+# ---------------------------------------------------------------------------
+
+def check_internet(state: dict, alerts: list):
+    """
+    Check internet connectivity via DNS port.
+    Alert only once per hour to avoid spam.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        sock.connect(("8.8.8.8", 53))
+        sock.close()
+        online = True
+    except Exception:
+        online = False
+
+    last_internet_alert = state.get("internet_alert_time", "")
+    now_str = datetime.now().strftime("%Y-%m-%d %H")  # hour-level key
+
+    if not online:
+        if last_internet_alert != now_str and not state.get("internet_down"):
+            alerts.append("🌐 Internet connectivity lost — cannot reach 8.8.8.8:53")
+            state["internet_down"] = True
+            state["internet_alert_time"] = now_str
+    else:
+        if state.get("internet_down"):
+            alerts.append("✅ Internet connectivity restored")
+        state["internet_down"] = False
+
+
+# ---------------------------------------------------------------------------
+# 5. Git sync check — is ~/.jarvis behind remote?
+# ---------------------------------------------------------------------------
+
+def check_git_sync(state: dict, alerts: list):
+    """Warn if local ~/.jarvis repo is behind its remote."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(JARVIS_HOME), "fetch", "--dry-run"],
+            capture_output=True, text=True, timeout=10,
+        )
+        output = (r.stdout + r.stderr).strip()
+        # 'git fetch --dry-run' prints lines like:
+        #   = [up to date]      main -> origin/main  (nothing to do)
+        #   * branch            main -> FETCH_HEAD    (behind)
+        # Any non-empty output that isn't purely "up to date" means behind
+        is_behind = bool(output) and "up to date" not in output
+
+        if is_behind and not state.get("git_behind_alerted"):
+            alerts.append(f"🔄 ~/.jarvis repo is behind remote — consider pulling:\n`git -C ~/.jarvis pull`")
+            state["git_behind_alerted"] = True
+        elif not is_behind:
+            state["git_behind_alerted"] = False
+
+    except Exception as e:
+        log(f"Git sync check error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 6. Daily summary at first run after midnight
+# ---------------------------------------------------------------------------
+
+def check_daily_summary(cfg: dict, state: dict):
+    """Send overnight summary once per day at the first run after 00:01."""
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+
+    if state.get("last_daily_summary") == today_str:
+        return  # Already sent today
+    if now.hour != 0:
+        return  # Only send in the midnight hour (00:xx)
+
+    try:
+        # Memory chunk count
+        try:
+            mem_r = requests.get("http://localhost:8181/memory/stats", timeout=5)
+            chunk_count = mem_r.json().get("total_chunks", "N/A") if mem_r.ok else "N/A"
+        except Exception:
+            chunk_count = "N/A"
+
+        # Disk usage
+        disk_pct = psutil.disk_usage("/").percent
+
+        # Last training time
+        last_train_file = JARVIS_HOME / "data" / "last_training.txt"
+        if last_train_file.exists():
+            last_train = last_train_file.read_text().strip()
+        else:
+            last_train = "unknown"
+
+        # Service uptime minutes (populated by check_jarvis_uptime)
+        uptime_min = state.get("jarvis_uptime_minutes", 0)
+        if uptime_min >= 60:
+            uptime_str = f"{uptime_min // 60}h {uptime_min % 60}m"
+        else:
+            uptime_str = f"{uptime_min}m"
+
+        # VPS PM2 summary (brief)
+        vps_host = cfg.get("openclaw", {}).get("vps_host", "")
+        vps_status = "N/A"
+        if vps_host:
+            try:
+                vr = subprocess.run(
+                    ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
+                     f"admin93@{vps_host}",
+                     "pm2 list --no-color 2>/dev/null | grep -c online || echo 0"],
+                    capture_output=True, text=True, timeout=12,
+                )
+                if vr.returncode == 0:
+                    count = vr.stdout.strip().splitlines()[-1].strip()
+                    vps_status = f"{count} PM2 processes online"
+            except Exception:
+                vps_status = "unreachable"
+
+        msg = (
+            f"🌙 Jarvis overnight summary ({today_str}):\n"
+            f"• Services: all up {uptime_str}\n"
+            f"• Memory: {chunk_count} chunks\n"
+            f"• Disk: {disk_pct:.1f}% used\n"
+            f"• Last training: {last_train}\n"
+            f"• VPS: {vps_status}"
+        )
+
+        send_telegram(msg, cfg)
+        log(f"Daily summary sent for {today_str}")
+        state["last_daily_summary"] = today_str
+
+    except Exception as e:
+        log(f"Daily summary error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 7. Log rotation warning
+# ---------------------------------------------------------------------------
+
+def check_log_sizes(state: dict, alerts: list):
+    """Warn if any log file in ~/.jarvis/logs/ exceeds LOG_SIZE_WARN_MB."""
+    logs_dir = JARVIS_HOME / "logs"
+    if not logs_dir.exists():
+        return
+    try:
+        for log_path in logs_dir.glob("*.log"):
+            size_mb = log_path.stat().st_size / (1024 * 1024)
+            if size_mb > LOG_SIZE_WARN_MB:
+                key = f"log_size_warned_{log_path.name}"
+                if not state.get(key):
+                    alerts.append(
+                        f"📁 Log file large: {log_path.name} is {size_mb:.1f}MB "
+                        f"(>{LOG_SIZE_WARN_MB}MB) — healer.py should rotate"
+                    )
+                    state[key] = True
+            else:
+                state[f"log_size_warned_{log_path.name}"] = False
+    except Exception as e:
+        log(f"Log size check error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# VPS / SSL (unchanged)
+# ---------------------------------------------------------------------------
+
 def check_vps(cfg: dict, state: dict, alerts: list):
     """Check VPS health via SSH."""
     vps_host = cfg.get("openclaw", {}).get("vps_host", "")
@@ -183,7 +470,6 @@ def check_vps(cfg: dict, state: dict, alerts: list):
             output = r.stdout
             for line in output.splitlines():
                 if "stopped" in line or "errored" in line:
-                    # Extract process name
                     parts = line.split()
                     if len(parts) > 1:
                         name = parts[1].strip("│").strip()
@@ -214,7 +500,6 @@ def check_ssl(cfg: dict, alerts: list):
         return
     try:
         import ssl
-        import socket
         for domain in [vps_host]:
             try:
                 ctx = ssl.create_default_context()
@@ -233,14 +518,23 @@ def check_ssl(cfg: dict, alerts: list):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
     cfg = load_config()
     state = load_state()
     alerts = []
 
-    check_kali(state, alerts)
+    check_jarvis_uptime(state, alerts)   # 1. uptime tracking
+    check_kali(state, alerts)            # 2. CPU/RAM with top process
     check_gpu(state, alerts)
     check_services(state, alerts)
+    check_ollama_model(state, alerts)    # 3. Ollama model load check
+    check_internet(state, alerts)        # 4. Network connectivity
+    check_git_sync(state, alerts)        # 5. Git sync check
+    check_log_sizes(state, alerts)       # 7. Log size warnings
     check_vps(cfg, state, alerts)
     check_ssl(cfg, alerts)
 
@@ -254,6 +548,9 @@ def main():
             log(f"ALERT: {a}")
     else:
         log("All systems OK")
+
+    check_daily_summary(cfg, state)      # 6. Daily summary (sends its own message)
+    save_state(state)                    # Save again after daily summary updates state
 
     # Run AI decision engine
     try:

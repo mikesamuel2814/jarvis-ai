@@ -13,8 +13,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import chromadb
-import ollama
+# chromadb and ollama imported lazily inside run_learning() to avoid
+# segfault when called with --stats (which doesn't need them)
 
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 sys.path.insert(0, str(JARVIS_HOME))
@@ -22,6 +22,8 @@ sys.path.insert(0, str(JARVIS_HOME))
 from indexer import load_config, log
 
 INTERACTIONS_LOG = JARVIS_HOME / "data" / "interactions.jsonl"
+DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
+TRAINING_LOG     = JARVIS_HOME / "logs" / "training.log"
 
 _STRIP_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -100,33 +102,142 @@ def upsert_golden(collection, embed_model: str, query: str, response: str, times
 
 def analyze_bad_interaction(query: str, response: str, correction: str | None) -> str | None:
     prompt = (
-        f"A user rated this AI response as BAD.\n"
-        f"Query: {query}\n"
-        f"Response given: {response}\n"
-        + (f"Correct answer should be: {correction}\n" if correction else "")
-        + "\nIn one sentence, what rule should the AI remember for next time? "
-        "Start with 'When asked about' or 'When the user says'."
+        f"You are analyzing a failed response from Jarvis, Mike Samuel's personal AI assistant.\n"
+        f"Mike is a full-stack developer. He wants: direct answers, no fluff, technical depth, "
+        f"always addressed as Sir.\n\n"
+        f"Failed query: {query}\n"
+        f"Bad response: {response}\n"
+        + (f"Mike's correction: {correction}\n" if correction else "")
+        + "\nExtract 1-3 concrete rules Jarvis should follow. Format as short rules:\n"
+        '- "When asked about X, always Y"\n'
+        '- "Never say Z when Mike asks about W"\n'
+        '- "Always include code path when discussing project files"\n\n'
+        "Rules only. No explanation."
     )
     try:
         resp = ollama.chat(
             model="deepseek-r1:7b",
             messages=[
-                {"role": "system", "content": "Extract a concise one-sentence rule from a failed AI response. No preamble."},
+                {"role": "system", "content": "Extract concise rules from a failed AI response for Jarvis. No preamble."},
                 {"role": "user", "content": prompt},
             ],
-            options={"temperature": 0.2, "num_predict": 128, "num_ctx": 1024},
+            options={"temperature": 0.2, "num_predict": 256, "num_ctx": 1024},
         )
         text = _strip(resp["message"]["content"]).strip()
-        # Take only the first sentence
-        sentence = text.split(".")[0].strip()
-        if len(sentence) > 15:
-            return sentence + "."
+        if len(text) > 10:
+            return text
     except Exception:
         pass
     return None
 
 
+def summarize_good_interactions(interactions: list[dict]) -> str | None:
+    """Ask DeepSeek to identify patterns in what Jarvis got right."""
+    rated_good = [i for i in interactions if i.get("rating") == "good"]
+    if not rated_good:
+        return None
+
+    examples = "\n".join(
+        f"- Query: {e.get('query','')[:80]}"
+        for e in rated_good[:20]
+    )
+    prompt = (
+        "These are queries where Jarvis (Mike Samuel's personal AI) gave a good response.\n\n"
+        f"{examples}\n\n"
+        "In 3-5 bullet points, what types of queries does Jarvis handle well? "
+        "Be specific (e.g. 'Code debugging questions', 'VPS deployment commands'). "
+        "Bullet points only."
+    )
+    try:
+        resp = ollama.chat(
+            model="deepseek-r1:7b",
+            messages=[
+                {"role": "system", "content": "Identify patterns in successful AI responses. No preamble."},
+                {"role": "user", "content": prompt},
+            ],
+            options={"temperature": 0.3, "num_predict": 256, "num_ctx": 1024},
+        )
+        return _strip(resp["message"]["content"]).strip()
+    except Exception:
+        return None
+
+
+def check_memory_quality(collection) -> dict:
+    """Sample ChromaDB and assess memory quality."""
+    total = collection.count()
+    if total == 0:
+        return {"total": 0, "avg_len": 0, "sources": {}, "quality": "poor"}
+
+    sample_size = min(20, total)
+    try:
+        result = collection.get(limit=sample_size, include=["documents", "metadatas"])
+    except Exception:
+        return {"total": total, "avg_len": 0, "sources": {}, "quality": "poor"}
+
+    docs = result.get("documents", [])
+    metas = result.get("metadatas", [])
+
+    avg_len = int(sum(len(d) for d in docs) / len(docs)) if docs else 0
+
+    sources: dict[str, int] = {}
+    oldest = None
+    for meta in metas:
+        st = meta.get("source_type", "unknown")
+        sources[st] = sources.get(st, 0) + 1
+        ts_str = meta.get("indexed_at") or meta.get("timestamp", "")
+        if ts_str:
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if oldest is None or ts < oldest:
+                    oldest = ts
+            except Exception:
+                pass
+
+    if avg_len >= 300 and total >= 100:
+        quality = "good"
+    elif avg_len >= 100 and total >= 20:
+        quality = "fair"
+    else:
+        quality = "poor"
+
+    return {
+        "total": total,
+        "avg_len": avg_len,
+        "sources": sources,
+        "oldest_chunk": oldest.isoformat() if oldest else "unknown",
+        "quality": quality,
+    }
+
+
+def print_stats():
+    """Print interaction statistics for --stats flag."""
+    all_interactions = load_interactions(days=365)
+    good  = sum(1 for i in all_interactions if i.get("rating") == "good")
+    bad   = sum(1 for i in all_interactions if i.get("rating") == "bad")
+    unrated = sum(1 for i in all_interactions if not i.get("rating"))
+
+    last_training = "never"
+    last_training_file = JARVIS_HOME / "data" / "last_training.txt"
+    if last_training_file.exists():
+        last_training = last_training_file.read_text().strip()
+
+    print("=" * 42)
+    print("  Jarvis Learner Stats")
+    print("=" * 42)
+    print(f"  Total interactions (last 365d): {len(all_interactions)}")
+    print(f"  Good:    {good}")
+    print(f"  Bad:     {bad}")
+    print(f"  Unrated: {unrated}")
+    print(f"  Last training: {last_training}")
+    print("=" * 42)
+
+
 def run_learning():
+    import chromadb  # noqa: PLC0415 — lazy import avoids segfault in --stats mode
+    import ollama  # noqa: PLC0415
+
+    os.chdir(str(Path(__file__).parent))
+
     config = load_config()
     embed_model = config["memory"].get("embedding_model", "nomic-embed-text")
     client = chromadb.PersistentClient(path=config["memory"]["path"])
@@ -181,8 +292,36 @@ def run_learning():
             log(f"  [golden] {q[:60]}")
             golden_added += 1
 
+    # Summarise what Jarvis is doing well → persist in decision_state.json
+    good_patterns = summarize_good_interactions(interactions)
+    if good_patterns:
+        log(f"  [patterns] {good_patterns[:120]}")
+        try:
+            state: dict = {}
+            if DECISION_STATE.exists():
+                state = json.loads(DECISION_STATE.read_text())
+            state["good_patterns"] = good_patterns
+            state["good_patterns_updated"] = datetime.now().isoformat()
+            DECISION_STATE.write_text(json.dumps(state, indent=2))
+        except Exception as e:
+            log(f"  [patterns] Could not write decision_state.json: {e}")
+
+    # Memory quality check
+    quality = check_memory_quality(collection)
+    log(f"  [quality] total={quality['total']} avg_len={quality['avg_len']} "
+        f"sources={quality['sources']} quality={quality['quality']}")
+    try:
+        TRAINING_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(TRAINING_LOG, "a") as f:
+            f.write(f"[{datetime.now().isoformat()}] quality_check={json.dumps(quality)}\n")
+    except Exception:
+        pass
+
     log(f"Learner: done. +{lessons_added} lessons, +{golden_added} golden examples. Memory: {collection.count()} chunks total.")
 
 
 if __name__ == "__main__":
-    run_learning()
+    if "--stats" in sys.argv:
+        print_stats()
+    else:
+        run_learning()

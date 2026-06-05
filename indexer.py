@@ -191,9 +191,29 @@ def index_git_repos(collection, config, embed_model):
     code_extensions = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs",
                        ".sh", ".bash", ".zsh", ".md", ".yaml", ".yml",
                        ".json", ".toml", ".env.example", ".txt", ".sql"}
-    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv",
-                 "dist", "build", ".next", "target"}
+    skip_dirs = {
+        # version control
+        ".git",
+        # JS/TS build noise
+        "node_modules", ".next", ".turbo", ".parcel-cache",
+        "dist", "build", "out", "coverage", "storybook-static",
+        # Python noise
+        "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
+        # compiled / generated
+        "target",       # Rust/Java
+        ".cache",
+        # misc
+        ".idea", ".vscode",
+    }
     total = 0
+
+    def _is_binary(path: Path) -> bool:
+        """Quick binary-file sniff — read first 8 KB, look for null bytes."""
+        try:
+            chunk = path.read_bytes()[:8192]
+            return b"\x00" in chunk
+        except Exception:
+            return True
 
     repos = [d for d in repos_root.iterdir() if d.is_dir()]
     for repo in sorted(repos):
@@ -207,6 +227,8 @@ def index_git_repos(collection, config, embed_model):
                 if fpath.suffix.lower() not in code_extensions:
                     continue
                 if fpath.stat().st_size > 200_000:
+                    continue
+                if _is_binary(fpath):
                     continue
                 n = index_text_file(collection, fpath, "git_repo", embed_model)
                 repo_total += n
