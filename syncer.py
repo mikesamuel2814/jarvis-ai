@@ -135,8 +135,8 @@ def _llm_commit_message(files: list[str]) -> str | None:
         )
         if resp.status_code == 200:
             msg = resp.json().get("response", "").strip().splitlines()[0].strip().strip('"\'')
-            if 10 < len(msg) <= 80:
-                return msg
+            if len(msg) > 10:
+                return msg[:100]
     except Exception:
         pass
     return None
