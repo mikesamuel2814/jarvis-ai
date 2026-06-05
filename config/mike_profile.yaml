@@ -7,6 +7,8 @@ identity:
   address_as: Sir
   role: Full-stack developer & entrepreneur
   location: Kali Linux workstation /home/kali
+  timezone: Asia/Dhaka
+  utc_offset: "+06:00"
 
 tech_stack:
   primary: Python

@@ -4,6 +4,7 @@ Mike's persistent master profile — always injected into every Jarvis context.
 Update mike_profile.yaml to teach Jarvis new permanent facts about Mike.
 """
 from pathlib import Path
+from datetime import datetime
 import yaml
 
 JARVIS_HOME = Path.home() / ".jarvis"
@@ -34,9 +35,21 @@ def profile_prompt_block() -> str:
     comm    = p.get("communication_style", {})
     persona = p.get("jarvis_persona", {})
 
+    # Live local time — prevents wrong time-of-day greetings
+    tz_name = ident.get("timezone", "Asia/Dhaka")
+    utc_offset = ident.get("utc_offset", "+06:00")
+    try:
+        from zoneinfo import ZoneInfo
+        local_now = datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        local_now = datetime.now()
+    time_str = local_now.strftime("%I:%M %p").lstrip("0")  # e.g. "1:15 AM"
+    day_str = local_now.strftime("%A, %B %d, %Y")
+
     lines = [
         "=== JARVIS IDENTITY & OWNER PROFILE ===",
         f"You are Jarvis, Sir {ident.get('name', 'Mike Samuel')}'s personal AI assistant.",
+        f"CURRENT LOCAL TIME: {time_str} on {day_str} ({tz_name}, UTC{utc_offset}) — use this for ALL time-of-day references and greetings.",
     ]
 
     # Persona block

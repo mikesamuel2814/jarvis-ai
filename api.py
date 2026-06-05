@@ -9,6 +9,8 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +47,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serialise Ollama calls — 6GB VRAM can't load two models simultaneously
+_ollama_lock = threading.Semaphore(1)
+
+
+def _ollama_chat(model: str, messages: list, options: dict, retries: int = 2) -> dict:
+    """Thread-safe Ollama chat with retry on transient errors."""
+    last_err = None
+    for attempt in range(retries + 1):
+        with _ollama_lock:
+            try:
+                return ollama.chat(model=model, messages=messages, options=options)
+            except ollama.ResponseError as e:
+                last_err = e
+                break  # ResponseError = model truly unavailable, don't retry
+            except Exception as e:
+                last_err = e
+                if attempt < retries:
+                    time.sleep(3)
+    raise last_err
+
 
 CASUAL_PATTERNS = {
     "hello", "hi", "hey", "sup", "yo", "thanks", "thank you",
@@ -393,23 +416,19 @@ def query(req: QueryRequest):
     # Tune temperature by query type
     temp = 0.3 if is_casual(req.query) or len(req.query.split()) <= 8 else 0.6
 
+    opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 2048}
     try:
-        response = ollama.chat(
-            model=model,
-            messages=messages,
-            options={"temperature": temp, "num_predict": 1024, "num_ctx": 2048},
-        )
+        response = _ollama_chat(model=model, messages=messages, options=opts)
         answer = strip_thinking(response["message"]["content"]).strip()
     except ollama.ResponseError:
         # Fallback to primary if routed model fails
         if model != PRIMARY_MODEL:
-            response = ollama.chat(
-                model=PRIMARY_MODEL,
-                messages=messages,
-                options={"temperature": temp, "num_predict": 1024, "num_ctx": 2048},
-            )
-            answer = strip_thinking(response["message"]["content"]).strip()
-            model = PRIMARY_MODEL
+            try:
+                response = _ollama_chat(model=PRIMARY_MODEL, messages=messages, options=opts)
+                answer = strip_thinking(response["message"]["content"]).strip()
+                model = PRIMARY_MODEL
+            except Exception as e2:
+                raise HTTPException(status_code=503, detail=f"Model unavailable: {e2}")
         else:
             raise HTTPException(status_code=503, detail="Model unavailable")
     except Exception as e:
