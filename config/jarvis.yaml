@@ -14,6 +14,7 @@ memory:
   embedding_model: mxbai-embed-large
 data_sources:
   claude_sessions: /home/kali/.jarvis/data/claude
+  claude_code_sessions: /home/kali/.claude/projects/-home-kali
   cursor_sessions: /home/kali/.jarvis/data/cursor
   git_repos: /home/kali/Projects
   shell_history: /home/kali/.zsh_history

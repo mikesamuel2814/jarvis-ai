@@ -155,6 +155,106 @@ def index_claude_sessions(collection, config, embed_model):
     return total
 
 
+def _extract_claude_code_text(jsonl_path):
+    """Parse a Claude Code .jsonl session and return conversation text."""
+    lines_text = []
+    title = ""
+    try:
+        with open(jsonl_path, errors="ignore") as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                except Exception:
+                    continue
+                t = obj.get("type", "")
+                if t == "ai-title":
+                    title = obj.get("aiTitle", "")
+                    continue
+                if t not in ("user", "assistant"):
+                    continue
+                msg = obj.get("message", {})
+                role = msg.get("role", t)
+                content = msg.get("content", "")
+                parts = []
+                if isinstance(content, str):
+                    if content.strip():
+                        parts.append(content.strip())
+                elif isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        bt = block.get("type", "")
+                        # Skip tool calls, results, and internal thinking
+                        if bt in ("tool_use", "tool_result", "thinking"):
+                            continue
+                        if bt == "text":
+                            txt = block.get("text", "").strip()
+                            if txt:
+                                parts.append(txt)
+                if parts:
+                    prefix = "User" if role == "user" else "Jarvis"
+                    lines_text.append(f"{prefix}: {' '.join(parts)}")
+    except Exception:
+        return ""
+    if not lines_text:
+        return ""
+    header = f"[Claude Code Session: {jsonl_path.stem}]\n"
+    if title:
+        header += f"Topic: {title}\n"
+    return header + "\n".join(lines_text)
+
+
+def index_claude_code_sessions(collection, config, embed_model):
+    """Index actual Claude Code JSONL sessions from ~/.claude/projects/."""
+    cc_dir = Path(config["data_sources"].get(
+        "claude_code_sessions",
+        Path.home() / ".claude" / "projects" / "-home-kali",
+    ))
+    if not cc_dir.exists():
+        return 0
+
+    total = 0
+    for f in sorted(cc_dir.glob("*.jsonl")):
+        # Skip tiny/empty files (< 2KB) — likely unstarted sessions
+        if f.stat().st_size < 2048:
+            continue
+        # Use already_indexed to skip unchanged files (keyed by path)
+        if already_indexed(collection, str(f)):
+            continue
+        text = _extract_claude_code_text(f)
+        if not text.strip():
+            continue
+        chunks = chunk_text(text)
+        added = 0
+        for i, chunk in enumerate(chunks):
+            emb = get_embedding(chunk, embed_model)
+            if emb is None:
+                continue
+            try:
+                collection.upsert(
+                    ids=[doc_id(str(f), i, chunk)],
+                    embeddings=[emb],
+                    documents=[chunk],
+                    metadatas=[{
+                        "source": str(f),
+                        "source_type": "claude_code_session",
+                        "chunk_index": i,
+                        "file_name": f.name,
+                        "indexed_at": datetime.now().isoformat(),
+                    }],
+                )
+                added += 1
+            except Exception as e:
+                log(f"  Upsert error {f.name}: {e}")
+        if added:
+            log(f"  Indexed Claude Code session: {f.name} ({added} chunks)")
+            total += added
+    return total
+
+
 def index_cursor_sessions(collection, config, embed_model):
     cursor_dir = Path(config["data_sources"].get("cursor_sessions", ""))
     if not cursor_dir.exists():
@@ -315,6 +415,9 @@ def run_indexing(config):
 
     log("Indexing Claude sessions...")
     total += index_claude_sessions(collection, config, embed_model)
+
+    log("Indexing Claude Code sessions...")
+    total += index_claude_code_sessions(collection, config, embed_model)
 
     log("Indexing Cursor sessions...")
     total += index_cursor_sessions(collection, config, embed_model)
