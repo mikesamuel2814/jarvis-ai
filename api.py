@@ -695,13 +695,25 @@ def _send_telegram_direct(text: str) -> bool:
     chat_id = _get_chat_id(token)
     if not chat_id:
         return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
+        # Try Markdown first, but Telegram 400s on malformed entities (e.g. the
+        # `**bold**` MarkdownV2 syntax some callers use vs legacy single-`*`).
+        # On any non-OK response, retry as plain text so approval prompts and
+        # alerts are NEVER silently dropped.
+        r = requests.post(
+            url,
             json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
             timeout=10,
         )
-        return True
+        if r.status_code == 200 and r.json().get("ok"):
+            return True
+        r = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        return r.status_code == 200 and r.json().get("ok", False)
     except Exception:
         return False
 
