@@ -296,24 +296,30 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
         return f"Error: {e}", None
 
 
+def _bar(pct: float, width: int = 10) -> str:
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
 def get_stats() -> str:
+    """Jarvis brain stats card."""
     try:
         resp = requests.get(f"{API_BASE}/stats", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        lines = [
-            f"Memory chunks: {d.get('memory_chunks', 'N/A')}",
-            f"Model: {d.get('primary_model', 'N/A')}",
-            f"Embed: {d.get('embed_model', 'N/A')}",
-        ]
+        chunks = d.get("memory_chunks", 0)
+        model = d.get("primary_model", "N/A")
         breakdown = d.get("source_type_breakdown", {})
-        if breakdown:
-            lines.append("\nSources:")
-            for k, v in sorted(breakdown.items(), key=lambda x: -x[1]):
-                lines.append(f"  {k}: {v}")
-        return "\n".join(lines)
+        top = sorted(breakdown.items(), key=lambda x: -x[1])
+        src_lines = "  ".join(f"`{k}:{v}`" for k, v in top)
+        return (
+            "*Jarvis Brain*\n"
+            f"Model: `{model}`\n"
+            f"Memory: `{chunks:,}` chunks\n"
+            f"Sources: {src_lines}"
+        )
     except Exception as e:
-        return f"Could not fetch stats: {e}"
+        return f"Stats unavailable: {e}"
 
 
 def get_health() -> str:
@@ -321,81 +327,91 @@ def get_health() -> str:
         resp = requests.get(f"{API_BASE}/health", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        emoji = "✅" if d.get("status") == "healthy" else "⚠️"
+        ok = d.get("status") == "healthy"
+        icon = "✅" if ok else "⚠️"
         return (
-            f"{emoji} Status: {d.get('status')}\n"
-            f"Ollama: {d.get('ollama')}\n"
-            f"Memory: {d.get('memory')} ({d.get('memory_chunks', 0)} chunks)\n"
-            f"Model: {d.get('model')}"
+            f"{icon} *Jarvis* — {d.get('status', 'unknown')}\n"
+            f"Ollama: `{d.get('ollama')}` | Memory: `{d.get('memory_chunks', 0):,}` chunks\n"
+            f"Model: `{d.get('model')}`"
         )
     except Exception as e:
         return f"Health check failed: {e}"
 
 
 def get_sysinfo() -> str:
+    """Full system stats card — minimal, one screen."""
     try:
-        resp = requests.get(f"{API_BASE}/sysinfo", timeout=15)
-        resp.raise_for_status()
-        d = resp.json()
-        lines = ["System Info\n"]
+        si = requests.get(f"{API_BASE}/sysinfo", timeout=15).json()
+        st = requests.get(f"{API_BASE}/stats", timeout=10).json()
+        hl = requests.get(f"{API_BASE}/health", timeout=10).json()
 
-        os_info = d.get("os", {})
-        if os_info and "system" in os_info:
+        cpu = si.get("cpu", {})
+        ram = si.get("ram", {})
+        disk = si.get("disk", {})
+        gpu = si.get("gpu", {})
+        net = si.get("network", {})
+        osinfo = si.get("os", {})
+        jarvis = si.get("jarvis", {})
+
+        svc_ok = hl.get("status") == "healthy"
+        svc_icon = "✅" if svc_ok else "⚠️"
+
+        chunks = st.get("memory_chunks", 0)
+        model = st.get("primary_model", "N/A")
+        breakdown = st.get("source_type_breakdown", {})
+        top2 = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
+        src = "  ".join(f"`{k}:{v}`" for k, v in top2)
+
+        lines = [
+            f"*Jarvis Stats* {svc_icon}",
+            "",
+            "*Brain*",
+            f"  Model: `{model}`  Memory: `{chunks:,}` chunks",
+            f"  {src}",
+            "",
+            "*Hardware*",
+        ]
+
+        if cpu:
             lines.append(
-                f"OS: {os_info['system']} {os_info.get('release', '')}\n"
-                f"Host: {os_info.get('hostname', 'N/A')}\n"
-                f"Uptime: {os_info.get('uptime_hours', 'N/A')}h"
+                f"  CPU `{cpu.get('usage_percent', '?')}%` {_bar(cpu.get('usage_percent', 0))}  "
+                f"`{cpu.get('cores_physical', '?')}c/{cpu.get('cores_logical', '?')}t`"
+            )
+        if ram:
+            lines.append(
+                f"  RAM `{ram.get('used_gb', '?')}/{ram.get('total_gb', '?')} GB` "
+                f"{_bar(ram.get('usage_percent', 0))}"
+            )
+        if disk:
+            lines.append(
+                f"  Disk `{disk.get('used_gb', '?')}/{disk.get('total_gb', '?')} GB` "
+                f"{_bar(disk.get('usage_percent', 0))}"
+            )
+        if gpu:
+            vram_pct = round(gpu.get("vram_used_mb", 0) / max(gpu.get("vram_total_mb", 1), 1) * 100)
+            lines.append(
+                f"  GPU `{gpu.get('utilization_percent', '?')}%` {_bar(gpu.get('utilization_percent', 0))}  "
+                f"VRAM `{gpu.get('vram_used_mb', '?')}/{gpu.get('vram_total_mb', '?')} MB`  "
+                f"`{gpu.get('temp_c', '?')}°C`"
             )
 
-        cpu = d.get("cpu", {})
-        if "cores_logical" in cpu:
-            lines.append(
-                f"\nCPU: {cpu.get('freq_mhz', 'N/A')} MHz — "
-                f"{cpu.get('cores_physical', '?')}c/{cpu.get('cores_logical', '?')}t — "
-                f"{cpu.get('usage_percent', 'N/A')}% usage"
-            )
+        if net:
+            ts = net.get("tailscale0", "")
+            local = net.get("eth0") or net.get("wlan0", "")
+            net_line = "  "
+            if local:
+                net_line += f"LAN `{local}`"
+            if ts:
+                net_line += f"  VPN `{ts}`"
+            if net_line.strip():
+                lines += ["", "*Network*", net_line]
 
-        ram = d.get("ram", {})
-        if "total_gb" in ram:
-            lines.append(
-                f"RAM: {ram.get('used_gb')} / {ram.get('total_gb')} GB "
-                f"({ram.get('usage_percent')}%)"
-            )
-
-        disk = d.get("disk", {})
-        if "total_gb" in disk:
-            lines.append(
-                f"Disk: {disk.get('used_gb')} / {disk.get('total_gb')} GB "
-                f"({disk.get('usage_percent')}%)"
-            )
-
-        gpu = d.get("gpu", {})
-        if "model" in gpu:
-            lines.append(
-                f"\nGPU: {gpu.get('model')}\n"
-                f"VRAM: {gpu.get('vram_used_mb')} / {gpu.get('vram_total_mb')} MB — "
-                f"{gpu.get('utilization_percent')}% — {gpu.get('temp_c')}°C"
-            )
-
-        net = d.get("network", {})
-        if net and not "error" in net:
-            ifaces = ", ".join(f"{k}: {v}" for k, v in net.items())
-            lines.append(f"\nNetwork: {ifaces}")
-
-        python_ver = d.get("python")
-        if python_ver:
-            lines.append(f"\n{python_ver}")
-
-        jarvis = d.get("jarvis", {})
-        if jarvis:
-            lines.append(
-                f"Jarvis: {jarvis.get('memory_chunks', 0)} memory chunks — "
-                f"model: {jarvis.get('model', 'N/A')}"
-            )
+        uptime = osinfo.get("uptime_hours", "?")
+        lines += ["", f"_Uptime {uptime}h — {osinfo.get('hostname', 'kali')}_"]
 
         return "\n".join(lines)
     except Exception as e:
-        return f"Could not fetch system info: {e}"
+        return f"Could not fetch stats: {e}"
 
 
 def trigger_index() -> str:
