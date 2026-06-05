@@ -482,6 +482,43 @@ class IndexRequest(BaseModel):
     force: Optional[bool] = False
 
 
+def _prewarm_model() -> None:
+    """Pre-load primary model and ChromaDB into RAM on startup."""
+    time.sleep(5)
+    try:
+        requests.post(
+            f"http://localhost:{os.environ.get('JARVIS_PORT', 11434)}/api/generate",
+            json={"model": PRIMARY_MODEL, "prompt": "Hi", "stream": False,
+                  "options": {"num_predict": 1}},
+            timeout=30,
+        )
+    except Exception:
+        pass
+    try:
+        col = get_collection()
+        if col.count() > 0:
+            col.query(query_embeddings=[[0.0] * 768], n_results=1, include=[])
+    except Exception:
+        pass
+
+threading.Thread(target=_prewarm_model, daemon=True).start()
+
+
+@app.get("/cache-stats")
+def cache_stats():
+    total_hits = sum(e.get("hits", 0) for e in _response_cache.values())
+    oldest = min((e["ts"] for e in _response_cache.values()), default=0)
+    return {"entries": len(_response_cache), "total_hits": total_hits,
+            "oldest_ts": oldest, "embed_entries": len(_embed_cache)}
+
+
+@app.post("/cache-clear")
+def cache_clear():
+    n = len(_response_cache)
+    _response_cache.clear()
+    return {"cleared": n}
+
+
 @app.get("/health")
 def health():
     try:
