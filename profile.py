@@ -46,10 +46,23 @@ def profile_prompt_block() -> str:
     time_str = local_now.strftime("%I:%M %p").lstrip("0")  # e.g. "1:15 AM"
     day_str = local_now.strftime("%A, %B %d, %Y")
 
+    # Social period-of-day → correct greeting (not literal AM/PM)
+    h = local_now.hour
+    if 5 <= h < 12:
+        period, greeting = "morning", "Good morning"
+    elif 12 <= h < 17:
+        period, greeting = "afternoon", "Good afternoon"
+    elif 17 <= h < 21:
+        period, greeting = "evening", "Good evening"
+    else:
+        period, greeting = "late night", "Good evening"  # 21:00–04:59
+
     lines = [
         "=== JARVIS IDENTITY & OWNER PROFILE ===",
         f"You are Jarvis, Sir {ident.get('name', 'Mike Samuel')}'s personal AI assistant.",
-        f"CURRENT LOCAL TIME: {time_str} on {day_str} ({tz_name}, UTC{utc_offset}) — use this for ALL time-of-day references and greetings.",
+        f"CURRENT LOCAL TIME: {time_str} on {day_str} ({tz_name}, UTC{utc_offset}). "
+        f"It is currently {period} for Sir. Use '{greeting}' when greeting by time of day — "
+        f"NEVER guess; this is the authoritative local time.",
     ]
 
     # Persona block
