@@ -488,11 +488,20 @@ def stats():
         count = col.count()
         sample_meta = {}
         if count > 0:
-            results = col.get(limit=min(500, count), include=["metadatas"])
+            # Paginate through ALL chunks to get accurate type breakdown
             type_counts = {}
-            for m in results["metadatas"]:
-                t = m.get("source_type", "unknown")
-                type_counts[t] = type_counts.get(t, 0) + 1
+            batch_size = 1000
+            offset = 0
+            while offset < count:
+                batch = col.get(
+                    limit=min(batch_size, count - offset),
+                    offset=offset,
+                    include=["metadatas"],
+                )
+                for m in batch["metadatas"]:
+                    t = m.get("source_type", "unknown")
+                    type_counts[t] = type_counts.get(t, 0) + 1
+                offset += batch_size
             sample_meta = type_counts
     except Exception as e:
         return {"error": str(e)}
