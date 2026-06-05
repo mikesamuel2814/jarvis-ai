@@ -4,6 +4,8 @@
 
 Jarvis is a fully autonomous personal AI assistant running locally on a Kali Linux workstation. It combines a local LLM brain, semantic memory, Telegram interface, voice responses, proactive decision-making, and self-healing — all running on consumer hardware.
 
+**Telegram:** [@MikePiJarvisBot](https://t.me/MikePiJarvisBot) · **API:** `http://localhost:8181` · **Repos:** [GitHub](https://github.com/mikesamuel2814/jarvis-ai) · [GitLab](https://gitlab.com/programmerhimel/jarvis)
+
 ---
 
 ## Owner
@@ -108,14 +110,14 @@ Jarvis understands natural language requests and executes actions with permissio
 | `CONFIRM` | One-tap Telegram button | Restart Jarvis, restart Ollama, re-index |
 | `APPROVE` | Type "yes" confirmation | Deploy to VPS, SSH commands, shell, reboot |
 
-**Read-Only Actions (AUTO):**
-`ps` · `disk` · `memory` · `uptime` · `gpu` · `ports` · `who` · `services` · `logs_jarvis` · `logs_telegram` · `logs_ollama` · `crontab` · `network` · `ollama_models` · `top5_cpu` · `top5_mem` · `tailscale` · `docker_ps` · `docker_stats`
+**⚡ AUTO (39 actions — instant, no approval):**
+`ps` · `disk` · `memory` · `uptime` · `gpu` · `ports` · `who` · `services` · `logs_jarvis` · `logs_telegram` · `logs_ollama` · `crontab` · `network` · `ollama_models` · `top5_cpu` · `top5_mem` · `tailscale` · `docker_ps` · `docker_stats` · `docker_logs_api` · `docker_logs_bot` · `pm2_status` · `pm2_logs_gateway` · `pm2_logs_starline` · `git_status_all` · `nginx_status` · `jarvis_logs_tail` · `file_read` · `file_list` · `project_status` · `vps_disk` · `vps_free` · `vps_ps` · `git_log_gw` · `git_log_sl` · `git_diff_gw` · `git_diff_sl` · `vps_nginx_logs` · `vps_services`
 
-**Medium Risk (CONFIRM):**
-`restart_jarvis` · `restart_telegram` · `restart_ollama` · `restart_monitor` · `reindex` · `stop_jarvis` · `clear_history` · `docker_restart_*` · `docker_up/down`
+**🔔 CONFIRM (23 actions — one-tap Telegram button):**
+`restart_jarvis` · `restart_telegram` · `restart_ollama` · `restart_monitor` · `restart_jarvis_sync` · `reindex` · `stop_jarvis` · `clear_history` · `docker_restart_api` · `docker_restart_bot` · `docker_up` · `docker_down` · `restart_gateway` · `restart_starline` · `git_pull_gw` · `git_pull_sl` · `npm_install_gw` · `pnpm_install_sl` · `npm_build_gw` · `pnpm_build_sl` · `vps_git_pull_gw` · `vps_git_pull_sl` · `vps_restart_nginx`
 
-**High Risk (APPROVE):**
-`deploy_vps` · `ssh_cmd` · `shell` · `claude_task` · `reboot` · `update_system`
+**🔐 APPROVE (7 actions — high-risk, explicit confirmation):**
+`deploy_vps` · `ssh_cmd` · `shell` · `claude_task` · `file_write` · `reboot` · `update_system`
 
 ### 5. Proactive Decision Engine
 
@@ -215,25 +217,29 @@ Every prompt includes Mike's full profile:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Ollama + ChromaDB status + model info |
-| `POST` | `/query` | Main query with RAG + smart model routing |
-| `GET` | `/sysinfo` | CPU, RAM, GPU, disk, network, Python stats |
-| `GET` | `/stats` | Memory chunks + source type breakdown |
 | `GET` | `/selfcheck` | Full system health report (JSON) |
-| `POST` | `/index` | Trigger indexer.py re-index |
+| `GET` | `/sysinfo` | CPU, RAM, GPU, disk, network stats |
+| `GET` | `/stats` | Memory chunks + source type breakdown |
 | `GET` | `/models` | List available Ollama models |
-| `POST` | `/telegram/send` | Send Telegram message directly |
-| `POST` | `/telegram/alert` | Send alert with 🚨 prefix |
-| `POST` | `/action` | Execute whitelisted action (permission-gated) |
-| `POST` | `/claude-plan` | Claude-style action planning via LLM |
+| `GET` | `/persona` | Current system prompt template |
+| `POST` | `/query` | Main query with RAG + smart model routing |
+| `POST` | `/claude-plan` | AI action planning via Ollama |
+| `POST` | `/claude-exec` | Fast-path action detection + LLM planning loop |
+| `POST` | `/index` | Trigger indexer.py re-index |
 | `POST` | `/feedback` | Rate an interaction good/bad |
 | `POST` | `/correct` | Submit a correction for training |
 | `POST` | `/learn` | Trigger learner.py brain training |
 | `GET` | `/learning-stats` | Rated/corrected interaction counts |
+| `POST` | `/action` | Execute whitelisted action (permission-gated) |
 | `POST` | `/approve/{req_id}` | Approve a pending action |
 | `POST` | `/deny/{req_id}` | Deny a pending action |
+| `GET` | `/cache-stats` | Response cache entries, hits, embed cache size |
+| `POST` | `/cache-clear` | Clear response cache |
+| `POST` | `/telegram/send` | Send Telegram message directly |
+| `POST` | `/telegram/alert` | Send alert with 🚨 prefix |
 | `POST` | `/webhook` | VPS → Jarvis event webhook |
-| `POST` | `/voice/audio` | Generate TTS → MP3 bytes |
 | `POST` | `/voice/speak` | Speak TTS locally via mpg123 |
+| `POST` | `/voice/audio` | Generate TTS → return MP3 bytes |
 | `POST` | `/voice/notify` | Send TTS as Telegram voice message |
 
 ---
@@ -242,24 +248,45 @@ Every prompt includes Mike's full profile:
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome message |
+| `/start` | Welcome message, reset session |
 | `/help` | Full command list |
 | `/health` | Service health status |
 | `/stats` | Memory + model statistics |
-| `/sysinfo` | Live system info (CPU, RAM, GPU, disk) |
-| `/selfcheck` | Full system self-check report |
+| `/sysinfo` | Live system card (CPU · RAM · Disk · GPU · Network) |
+| `/selfcheck` | Full system self-check report (services, models, crons) |
 | `/index` | Trigger memory re-indexing |
 | `/clear` | Clear conversation history |
-| `/remember KEY VALUE` | Save a personal fact |
+| `/remember KEY VALUE` | Save a personal fact (persists across sessions) |
 | `/voice on\|off` | Toggle voice audio responses |
 | `/correct TEXT` | Correct last response (trains brain) |
 | `/learn` | Run brain training now |
-| `/actions` | List all available actions |
+| `/actions` | List all available actions by tier |
 | `/pending` | Show pending approval requests |
 | `/approve ID` | Approve a pending action |
 | `/deny ID` | Deny a pending action |
+| `/task DESC` | Delegate task to Claude Code (runs background, result here) |
+| `/exec CMD` | Smart dispatch: detect action or plan + execute via LLM |
 
 **Inline:** After every response, tap 👍 or 👎 to train Jarvis.
+
+### Natural Language Fast-Path (instant, no LLM)
+
+Typing any of these routes directly to the system — never the LLM:
+
+`stats` · `openclaw stats` · `jarvis stats` · `system stats` · `sysinfo` · `system info` · `hardware info` · `full stats` · `give me stats` · any phrase ≤5 words containing "stat"
+
+### Quick Aliases (type without slash)
+
+| Alias | Action |
+|---|---|
+| `pm2` | pm2_status |
+| `nginx` | nginx_status |
+| `git st` | git_status_all |
+| `jlogs` | jarvis_logs_tail |
+| `gw logs` | pm2_logs_gateway |
+| `gw restart` | restart_gateway |
+| `sl logs` | pm2_logs_starline |
+| `sl restart` | restart_starline |
 
 ---
 
@@ -356,8 +383,15 @@ ollama.service           → Ollama LLM       (GPU inference)
 **VRAM Optimizations (RTX 3050 6GB):**
 - `OLLAMA_FLASH_ATTENTION=1` — 40% KV cache reduction
 - `OLLAMA_MAX_LOADED_MODELS=1` — one model in VRAM at a time
-- `OLLAMA_NUM_CTX=2048` — context cap
+- `num_ctx=8192` — KV cache overflow to 64GB RAM
+- `num_keep=256` — system prompt always pinned in VRAM
 - Models ≤ 7B parameters
+
+**RAM Utilization (64GB):**
+- Response cache: 300 entries, 600s TTL — cached hits ~0.01s vs 30s cold
+- Embedding cache: 2000 entries — no re-embedding same text
+- ChromaDB pre-warm: full collection loaded into page cache at startup
+- `MALLOC_ARENA_MAX=4` — 4 allocator arenas across 32 threads
 
 **Planned upgrade:** NVIDIA Project DIGITS / RTX Spark (~128GB unified memory) for 70B+ models.
 
