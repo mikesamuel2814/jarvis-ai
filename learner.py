@@ -19,7 +19,18 @@ from pathlib import Path
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 sys.path.insert(0, str(JARVIS_HOME))
 
-from indexer import load_config, log
+# Lazy import: indexer drags in chromadb which segfaults in --stats mode
+if "--stats" not in sys.argv:
+    from indexer import load_config, log
+else:
+    import yaml as _yaml
+
+    def load_config() -> dict:
+        cfg = JARVIS_HOME / "config" / "jarvis.yaml"
+        return _yaml.safe_load(cfg.read_text()) if cfg.exists() else {}
+
+    def log(msg: str) -> None:
+        pass
 
 INTERACTIONS_LOG = JARVIS_HOME / "data" / "interactions.jsonl"
 DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
@@ -57,6 +68,7 @@ def _chunk_id(prefix: str, text: str) -> str:
 
 def _embed(text: str, embed_model: str) -> list[float] | None:
     try:
+        import ollama  # noqa: PLC0415
         return ollama.embeddings(model=embed_model, prompt=text[:4096])["embedding"]
     except Exception:
         return None
@@ -115,6 +127,7 @@ def analyze_bad_interaction(query: str, response: str, correction: str | None) -
         "Rules only. No explanation."
     )
     try:
+        import ollama  # noqa: PLC0415
         resp = ollama.chat(
             model="deepseek-r1:7b",
             messages=[
@@ -149,6 +162,7 @@ def summarize_good_interactions(interactions: list[dict]) -> str | None:
         "Bullet points only."
     )
     try:
+        import ollama  # noqa: PLC0415
         resp = ollama.chat(
             model="deepseek-r1:7b",
             messages=[
