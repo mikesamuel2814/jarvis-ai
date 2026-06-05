@@ -42,12 +42,12 @@ ACTIONS: dict[str, dict] = {
     "tailscale":         {"desc": "Tailscale status",              "cmd": "tailscale status",                                    "tier": AUTO},
 
     # ── Medium risk (confirm) ─────────────────────────────────────────────────
-    "restart_jarvis":    {"desc": "Restart Jarvis API",            "cmd": "sudo systemctl restart jarvis",                      "tier": CONFIRM},
-    "restart_telegram":  {"desc": "Restart Telegram bot",          "cmd": "sudo systemctl restart jarvis-telegram",             "tier": CONFIRM},
-    "restart_ollama":    {"desc": "Restart Ollama",                "cmd": "sudo systemctl restart ollama",                      "tier": CONFIRM},
-    "restart_monitor":   {"desc": "Restart monitor service",       "cmd": "sudo systemctl restart jarvis-monitor",              "tier": CONFIRM},
+    "restart_jarvis":    {"desc": "Restart Jarvis API",            "cmd": "sudo -n systemctl restart jarvis",                      "tier": CONFIRM},
+    "restart_telegram":  {"desc": "Restart Telegram bot",          "cmd": "sudo -n systemctl restart jarvis-telegram",             "tier": CONFIRM},
+    "restart_ollama":    {"desc": "Restart Ollama",                "cmd": "sudo -n systemctl restart ollama",                      "tier": CONFIRM},
+    "restart_monitor":   {"desc": "Restart monitor service",       "cmd": "sudo -n systemctl restart jarvis-monitor",              "tier": CONFIRM},
     "reindex":           {"desc": "Re-index all data into memory", "cmd": "python3 /home/kali/.jarvis/indexer.py --now",        "tier": CONFIRM},
-    "stop_jarvis":       {"desc": "Stop Jarvis API",               "cmd": "sudo systemctl stop jarvis",                         "tier": CONFIRM},
+    "stop_jarvis":       {"desc": "Stop Jarvis API",               "cmd": "sudo -n systemctl stop jarvis",                         "tier": CONFIRM},
     "clear_history":     {"desc": "Clear Jarvis memory DB",        "cmd": None,                                                  "tier": CONFIRM},
 
     # ── Docker management (confirm) ───────────────────────────────────────────
@@ -98,7 +98,7 @@ ACTIONS: dict[str, dict] = {
     "vps_git_pull_gw":   {"desc": "git pull Payment-Gateway on VPS","cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Payment-Gateway && git pull 2>&1'",                                          "tier": CONFIRM},
     "vps_git_pull_sl":   {"desc": "git pull Starline on VPS",      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Starline-Final-web && git pull 2>&1'",                                        "tier": CONFIRM},
     "vps_restart_nginx": {"desc": "Restart Nginx on VPS",          "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'sudo systemctl restart nginx 2>&1'",                                               "tier": CONFIRM},
-    "restart_jarvis_sync":{"desc":"Restart jarvis-sync service",   "cmd": "sudo systemctl restart jarvis-sync",                                                                                                      "tier": CONFIRM},
+    "restart_jarvis_sync":{"desc":"Restart jarvis-sync service",   "cmd": "sudo -n systemctl restart jarvis-sync",                                                                                                   "tier": CONFIRM},
 
     # ── High risk (approve) ───────────────────────────────────────────────────
     "deploy_vps":        {"desc": "Deploy to VPS (git pull + pm2 restart)", "cmd": None,                                        "tier": APPROVE},
@@ -106,8 +106,8 @@ ACTIONS: dict[str, dict] = {
     "shell":             {"desc": "Run arbitrary shell command",   "cmd": None,                                                  "tier": APPROVE},
     "claude_task":       {"desc": "Run a Claude Code task (background, results via Telegram)", "cmd": None,                     "tier": APPROVE},
     "file_write":        {"desc": "Write content to a local file (path:content as arg)",       "cmd": None,                     "tier": APPROVE},
-    "reboot":            {"desc": "Reboot Kali machine",           "cmd": "sudo reboot",                                        "tier": APPROVE},
-    "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo apt update && sudo apt upgrade -y",             "tier": APPROVE},
+    "reboot":            {"desc": "Reboot Kali machine",           "cmd": "sudo -n reboot",                                     "tier": APPROVE},
+    "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo -n apt update && sudo -n apt upgrade -y",      "tier": APPROVE},
 }
 
 # ── Natural language → action name ────────────────────────────────────────────
