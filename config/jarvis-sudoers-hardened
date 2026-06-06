@@ -1,0 +1,33 @@
+# Jarvis v3 Hardened sudoers — NO NOPASSWD for write/system-modifying commands
+# Install: sudo cp /home/kali/.jarvis/config/jarvis-sudoers-hardened /etc/sudoers.d/jarvis && sudo chmod 440 /etc/sudoers.d/jarvis
+#
+# Policy: read-only/status commands may be NOPASSWD for automation.
+# Any write operation (apt, reboot, file copy to system dirs) requires PASSWD.
+
+# ── SAFE: read-only status (NOPASSWD allowed) ────────────────────────────
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active *
+
+# ── MODERATE: service restarts (NOPASSWD for Jarvis ecosystem only) ──────
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-telegram
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-monitor
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-cursor
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ollama
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop jarvis
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop jarvis-telegram
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop openclaw
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis-telegram
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start openclaw
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis-cursor
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+
+# ── WRITE OPERATIONS: require PASSWD (no NOPASSWD) ───────────────────────
+# kali ALL=(ALL) PASSWD: /usr/bin/apt update
+# kali ALL=(ALL) PASSWD: /usr/bin/apt upgrade -y
+# kali ALL=(ALL) PASSWD: /usr/bin/cp /home/kali/.jarvis/systemd/*.service /etc/systemd/system/
+# kali ALL=(ALL) PASSWD: /usr/sbin/reboot
+#
+# To use these, Jarvis must prompt for the sudo password.

@@ -76,30 +76,30 @@ ACTIONS: dict[str, dict] = {
     "docker_down":       {"desc": "Stop Jarvis Docker stack",              "cmd": "cd /home/kali/.jarvis/docker && docker compose down", "tier": CONFIRM},
 
     # ── VPS project monitoring (auto) ────────────────────────────────────────
-    "pm2_status":        {"desc": "VPS PM2 process list",                  "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 list 2>&1 | head -30'",                                                  "tier": AUTO},
-    "pm2_logs_gateway":  {"desc": "AsthaCash gateway backend logs",        "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs gateway-backend --lines 20 --nostream 2>&1'",                       "tier": AUTO},
-    "pm2_logs_starline": {"desc": "Starline API server logs",              "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 logs api-server --lines 20 --nostream 2>&1'",                            "tier": AUTO},
+    "pm2_status":        {"desc": "VPS PM2 process list",                  "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 list 2>&1 | head -30'",                                                  "tier": AUTO},
+    "pm2_logs_gateway":  {"desc": "AsthaCash gateway backend logs",        "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 logs gateway-backend --lines 20 --nostream 2>&1'",                       "tier": AUTO},
+    "pm2_logs_starline": {"desc": "Starline API server logs",              "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 logs api-server --lines 20 --nostream 2>&1'",                            "tier": AUTO},
     "git_status_all":    {"desc": "Git status across all projects",        "cmd": r"find /home/kali/Projects -name '.git' -maxdepth 3 -exec sh -c 'echo \"=== $(dirname {}) ===\"; git -C $(dirname {}) status --short' \;", "tier": AUTO},
-    "nginx_status":      {"desc": "VPS Nginx status",                      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl status nginx --no-pager -l | head -20'",                   "tier": AUTO},
+    "nginx_status":      {"desc": "VPS Nginx status",                      "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'systemctl status nginx --no-pager -l | head -20'",                   "tier": AUTO},
     "jarvis_logs_tail":  {"desc": "Jarvis API latest logs",                "cmd": "tail -50 /home/kali/.jarvis/logs/jarvis.log",                                                                                      "tier": AUTO},
 
     # ── VPS project restarts (confirm) ───────────────────────────────────────
-    "restart_gateway":   {"desc": "Restart AsthaCash gateway backend on VPS", "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart gateway-backend 2>&1'",                                      "tier": CONFIRM},
-    "restart_starline":  {"desc": "Restart Starline API server on VPS",    "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 restart api-server 2>&1'",                                              "tier": CONFIRM},
+    "restart_gateway":   {"desc": "Restart AsthaCash gateway backend on VPS", "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 restart gateway-backend 2>&1'",                                      "tier": CONFIRM},
+    "restart_starline":  {"desc": "Restart Starline API server on VPS",    "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 restart api-server 2>&1'",                                              "tier": CONFIRM},
 
     # ── File & project read-only (auto) ─────────────────────────────────────
     "file_read":         {"desc": "Read a file (path as arg)",     "cmd": None,                                                  "tier": AUTO},
     "file_list":         {"desc": "List a directory (path as arg)","cmd": None,                                                  "tier": AUTO},
     "project_status":    {"desc": "Status of both projects (PM2 + git)", "cmd": None,                                           "tier": AUTO},
-    "vps_disk":          {"desc": "VPS disk usage",                "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'df -h'",                                                                              "tier": AUTO},
-    "vps_free":          {"desc": "VPS RAM usage",                 "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'free -h'",                                                                            "tier": AUTO},
-    "vps_ps":            {"desc": "VPS running processes",         "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'ps aux --sort=-%cpu | head -20'",                                                     "tier": AUTO},
+    "vps_disk":          {"desc": "VPS disk usage",                "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'df -h'",                                                                              "tier": AUTO},
+    "vps_free":          {"desc": "VPS RAM usage",                 "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'free -h'",                                                                            "tier": AUTO},
+    "vps_ps":            {"desc": "VPS running processes",         "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'ps aux --sort=-%cpu | head -20'",                                                     "tier": AUTO},
     "git_log_gw":        {"desc": "Recent commits in Payment-Gateway", "cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway log --oneline -15",                                                              "tier": AUTO},
     "git_log_sl":        {"desc": "Recent commits in Starline",    "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web log --oneline -15",                                                               "tier": AUTO},
     "git_diff_gw":       {"desc": "Unstaged changes in Payment-Gateway","cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway diff --stat",                                                                    "tier": AUTO},
     "git_diff_sl":       {"desc": "Unstaged changes in Starline",  "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web diff --stat",                                                                     "tier": AUTO},
-    "vps_nginx_logs":    {"desc": "VPS Nginx error logs",          "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'tail -30 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx -n 30 --no-pager'", "tier": AUTO},
-    "vps_services":      {"desc": "VPS systemd services status",   "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'systemctl list-units --type=service --state=running --no-pager | head -20'",         "tier": AUTO},
+    "vps_nginx_logs":    {"desc": "VPS Nginx error logs",          "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'tail -30 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx -n 30 --no-pager'", "tier": AUTO},
+    "vps_services":      {"desc": "VPS systemd services status",   "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'systemctl list-units --type=service --state=running --no-pager | head -20'",         "tier": AUTO},
 
     # ── Local project builds (confirm) ───────────────────────────────────────
     "git_pull_gw":       {"desc": "git pull Payment-Gateway",      "cmd": "git -C /home/kali/Projects/kalimike/Payment-Gateway pull",                                                                               "tier": CONFIRM},
@@ -110,9 +110,9 @@ ACTIONS: dict[str, dict] = {
     "pnpm_build_sl":     {"desc": "pnpm build Starline frontend",  "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm run build",                                                                   "tier": CONFIRM, "timeout": 300},
 
     # ── VPS management (confirm) ─────────────────────────────────────────────
-    "vps_git_pull_gw":   {"desc": "git pull Payment-Gateway on VPS","cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Payment-Gateway && git pull 2>&1'",                                          "tier": CONFIRM},
-    "vps_git_pull_sl":   {"desc": "git pull Starline on VPS",      "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Starline-Final-web && git pull 2>&1'",                                        "tier": CONFIRM},
-    "vps_restart_nginx": {"desc": "Restart Nginx on VPS",          "cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'sudo systemctl restart nginx 2>&1'",                                               "tier": CONFIRM},
+    "vps_git_pull_gw":   {"desc": "git pull Payment-Gateway on VPS","cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'cd ~/Payment-Gateway && git pull 2>&1'",                                          "tier": CONFIRM},
+    "vps_git_pull_sl":   {"desc": "git pull Starline on VPS",      "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'cd ~/Starline-Final-web && git pull 2>&1'",                                        "tier": CONFIRM},
+    "vps_restart_nginx": {"desc": "Restart Nginx on VPS",          "cmd": "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'sudo systemctl restart nginx 2>&1'",                                               "tier": CONFIRM},
     "restart_jarvis_sync":{"desc":"Restart jarvis-sync service",   "cmd": "sudo -n systemctl restart jarvis-sync",                                                                                                   "tier": CONFIRM},
 
     # ── High risk (approve) ───────────────────────────────────────────────────
@@ -487,7 +487,7 @@ def _project_status() -> dict:
     lines = []
     # PM2 status
     pm2 = subprocess.run(
-        "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'pm2 list 2>&1 | head -20'",
+        "ssh -o StrictHostKeyChecking=accept-new admin93@38.47.35.16 'pm2 list 2>&1 | head -20'",
         shell=True, capture_output=True, text=True, timeout=15,
     )
     lines.append("=== VPS PM2 ===\n" + (pm2.stdout + pm2.stderr).strip()[:500])
