@@ -1938,24 +1938,19 @@ def main():
                 await update.message.reply_text(plain or "Done.")
             return
 
-        # Intercept kali tool names typed as plain text → redirect to /kali usage
-        _KALI_TOOL_NAMES = {
-            "nmap", "nmap_quick", "nmap_full", "nmap_service", "nmap_ping", "nmap_vuln",
-            "nikto", "wpscan", "gobuster", "gobuster_dir", "ffuf", "sqlmap", "nuclei",
-            "whatweb", "masscan", "enum4linux", "smb_list", "hydra", "hashcat", "john",
-            "msf_resource", "metasploit", "searchsploit", "theharvester", "whois",
-            "dig", "host", "nslookup", "dirb", "burpsuite", "zaproxy",
-        }
+        # Intercept kali tool names typed as plain text → redirect to /kali usage hint.
+        # This must run BEFORE detect_action() because NL_MAP has short entries like
+        # "ps" that are substrings of tool names (e.g. "ps" ⊂ "wpscan") and would
+        # fire the wrong action.
         from fmt import esc as _esc
-        _first_word = text.strip().lower().split()[0] if text.strip() else ""
-        if _first_word in _KALI_TOOL_NAMES:
-            _rest = text.strip().split()[1:] if len(text.strip().split()) > 1 else []
-            _example_target = _rest[0] if _rest else "scanme.nmap.org"
+        _msg_words = text.strip().lower().split()
+        if _msg_words and _msg_words[0] in _KALI_TOOL_NAMES:
+            _tool = _msg_words[0]
             await send(
                 update,
-                f"💡 Looks like you want to run <b>{_esc(_first_word)}</b>.\n"
-                f"Usage: <code>/kali {_esc(_first_word)} &lt;target&gt; [opts]</code>\n"
-                f"Example: <code>/kali {_esc(_first_word)} {_esc(_example_target)}</code>",
+                f"💡 Looks like you want to run <b>{_esc(_tool)}</b>.\n"
+                f"Usage: <code>/kali {_esc(_tool)} &lt;target&gt; [opts]</code>\n"
+                f"Example: <code>/kali {_esc(_tool)} scanme.nmap.org</code>",
                 already_html=True,
             )
             return
@@ -2006,6 +2001,20 @@ def main():
                 except Exception:
                     await send(update, run_action_via_api(action))
                 return
+
+        # Fix 3: Short unrecognised plain-text messages with no clear intent →
+        # respond with a helpful nudge rather than guessing and firing a wrong action.
+        _QUERY_WORDS = {"what", "why", "how", "where", "when", "who", "which", "is", "are",
+                        "can", "could", "should", "does", "do", "will", "show", "tell", "?"}
+        if (
+            not action
+            and len(text.split()) <= 2
+            and "?" not in text
+            and not set(text.lower().split()) & _QUERY_WORDS
+        ):
+            await send(update,
+                "I didn't catch that, Sir. Try a question, a /command, or /actions for the full list.")
+            return
 
         # Web search auto-detection — check before LLM call
         from web_search import is_web_query, web_answer

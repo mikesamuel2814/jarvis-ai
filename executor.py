@@ -253,12 +253,21 @@ def detect_action(text: str) -> str | None:
       1. Raw 'claude ...' CLI passthrough.
       2. Exact alias match (ACTION_ALIASES).
       3. Longest NL_MAP phrase that appears in the query wins (specificity).
+
+    NOTE: Kali security tool names (wpscan, nmap, nikto, gobuster, etc.) are
+    never treated as system actions — they route to /kali instead.
     """
     t = text.strip()
     # 1. Raw claude CLI invocations
     if _CLAUDE_RESUME_RE.match(t) or _CLAUDE_CMD_RE.match(t):
         return "claude_task"
     tl = t.lower().rstrip("?.!")
+
+    # Guard: if the message contains a known Kali tool name, do not match any
+    # system action.  "wpscan", "nmap", etc. are security tool invocations and
+    # must not substring-match against short keywords like "ps" or "scan".
+    if _KALI_TOOL_NAMES.search(tl):
+        return None
 
     # 2. Alias exact match
     if tl in ACTION_ALIASES:
@@ -268,13 +277,14 @@ def detect_action(text: str) -> str | None:
     if tl in ACTIONS:
         return tl
 
-    # 3. Longest-phrase-wins across NL_MAP (whole-word match only — no substring)
-    import re as _re
+    # 3. Longest-phrase-wins across NL_MAP (whole-word match only — no substring).
+    # Previously "ps" (a phrase for the ps action) could match inside "wpscan"
+    # because the check was `phrase in tl`.  Now each phrase is anchored with
+    # negative lookbehind/lookahead so short keywords cannot fire mid-word.
     best_action: str | None = None
     best_len: int = 0
     for phrases, action in NL_MAP:
         for phrase in phrases:
-            # Require whole-word boundary so "ps" doesn't match inside "wpscan"
             pattern = r"(?<!\w)" + _re.escape(phrase) + r"(?!\w)"
             if _re.search(pattern, tl) and len(phrase) > best_len:
                 best_action = action

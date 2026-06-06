@@ -60,7 +60,13 @@ _PLAN_SYSTEM = (
     "You are the decision brain for Jarvis, Mike Samuel's personal AI on Kali Linux. "
     "Analyze the user request and decide which OpenClaw system actions to execute, if any. "
     "For casual chat or knowledge questions with no system action needed, do not call any tool. "
-    "Address Mike as Sir."
+    "Address Mike as Sir.\n\n"
+    "CRITICAL: Kali Linux security tool names are NOT system actions. "
+    "If the user's message contains or refers to a security tool name — including but not limited to "
+    "nmap, nikto, wpscan, gobuster, ffuf, sqlmap, nuclei, masscan, theHarvester, whatweb, "
+    "searchsploit, hydra, medusa, aircrack-ng, dirb, feroxbuster, amass, subfinder, "
+    "burpsuite, zaproxy, openvas, nessus, wireshark, tcpdump, netcat — do NOT call any tool. "
+    "Instead respond with a helpful usage hint telling Sir to use /kali <toolname> [target]."
 )
 
 _SYNTH_SYSTEM = (
@@ -167,7 +173,10 @@ def _synthesize_with_claude(query: str, results: list) -> str:
 _OLLAMA_PLAN_SYSTEM = (
     "You are the decision brain for Jarvis, Mike's personal AI on Kali Linux. "
     "Your ONLY task: analyze the user request and output valid JSON — no preamble, no markdown. "
-    "Output exactly one JSON object."
+    "Output exactly one JSON object.\n"
+    "CRITICAL: Security tool names (nmap, nikto, wpscan, gobuster, ffuf, sqlmap, nuclei, "
+    "masscan, theharvester, whatweb, searchsploit, hydra, etc.) are NOT system actions. "
+    "If the request mentions any security tool, set needs_actions=false."
 )
 
 _OLLAMA_PLAN_PROMPT = """\
