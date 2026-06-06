@@ -88,18 +88,26 @@ def route(
     """
     Determine which tier should handle this query.
 
-    Evaluation order (cheapest first):
+    Tier intent:
+      EDGE   — casual chat, greetings, instant sysinfo/status, trivial one-liners.
+      CURSOR — concrete code/ops on Mike's projects (fix, refactor, review, deploy, debug).
+      CLOUD  — open-ended reasoning: why/how/explain, analysis, architecture, multi-step planning.
+      HYBRID — local pre-analysis -> Cloud; fallback for ambiguous non-code prose.
+
+    Evaluation order (cheapest / most specific first):
       1. Explicit prefix override
-      2. Sysinfo fast-path → Edge
-      3. Edge whole-word patterns
-      4. History depth threshold → Cloud
-      5. Cloud whole-word patterns
-      6. Code query length split Edge vs Hybrid
-      7. Default: Hybrid
+      2. Sysinfo fast-path -> Edge
+      3. Edge casual/greeting patterns
+      4. History depth threshold -> Cloud
+      5. Cloud reasoning patterns (analytical verbs win over code actions)
+      6. Cursor code/ops patterns
+      7. Generic code keyword fallback (trivial+short -> Edge, else Cursor)
+      8. Default: Hybrid
     """
-    rules  = _load_routing().get("routing", {})
-    e_rules = rules.get("edge", {})
-    c_rules = rules.get("cloud", {})
+    rules    = _load_routing().get("routing", {})
+    e_rules  = rules.get("edge", {})
+    cur_rules = rules.get("cursor", {})
+    c_rules  = rules.get("cloud", {})
 
     ql = query.lower().strip()
 
@@ -107,7 +115,7 @@ def route(
     for pfx in e_rules.get("prefixes", ["!local", "!edge", "!fast"]):
         if ql.startswith(pfx):
             return BrainTier.EDGE
-    for pfx in ["!cursor", "!code"]:
+    for pfx in cur_rules.get("prefixes", ["!cursor", "!code"]):
         if ql.startswith(pfx):
             return BrainTier.CURSOR
     for pfx in c_rules.get("prefixes", ["!cloud", "!kimi", "!claude", "!deep"]):
@@ -117,59 +125,82 @@ def route(
         if ql.startswith(pfx):
             return BrainTier.HYBRID
 
-    # ── 2. Sysinfo fast-path ───────────────────────────────────
+    # ── 2. Sysinfo fast-path -> Edge ───────────────────────────
     sysinfo_kws = e_rules.get("sysinfo_keywords", [
-        "disk", "cpu", "ram", "memory", "uptime", "gpu",
-        "temperature", "processes", "services",
+        "disk", "cpu", "ram", "memory", "vram", "uptime", "gpu",
+        "temperature", "temp", "load", "processes", "services",
     ])
-    sysinfo_verbs = ["check", "show", "what", "how much", "status", "usage"]
+    sysinfo_verbs = e_rules.get("sysinfo_verbs", [
+        "check", "show", "what", "how much", "how many",
+        "status", "usage", "free", "list",
+    ])
     if any(kw in ql for kw in sysinfo_kws) and any(v in ql for v in sysinfo_verbs):
         return BrainTier.EDGE
 
-    # ── 3. Edge whole-word patterns ────────────────────────────
+    # ── 3. Edge casual/greeting patterns ───────────────────────
     edge_patterns = e_rules.get("patterns", [
-        r"\bhello\b", r"\bhi\b", r"\bhey\b", r"\bgood morning\b",
-        r"\bdisk space\b", r"\bdisk usage\b", r"\bcpu usage\b",
-        r"\bgpu temp\b", r"\bram usage\b", r"\buptime\b",
-        r"\bps aux\b", r"\btop\b", r"\bjobs\b",
-        r"\brestart jarvis\b", r"\bclear history\b",
-        r"\bwhat time\b", r"\bping\b",
+        r"^\s*(hi|hey|hello|yo|sup|howdy)\b",
+        r"\bgood (morning|afternoon|evening|night)\b",
+        r"\bhow are you\b", r"\bthank(s| you)\b",
+        r"\bwhat time\b", r"\bping\b", r"\buptime\b",
+        r"\brestart jarvis\b", r"\bclear (history|context|memory)\b",
     ])
     if _word_match(query, edge_patterns):
         return BrainTier.EDGE
 
-    # ── 4. History depth → Cloud ───────────────────────────────
+    # ── 4. History depth -> Cloud ──────────────────────────────
     depth_threshold = c_rules.get("history_depth_threshold", 20)
     if history and len(history) > depth_threshold:
         return BrainTier.CLOUD
 
-    # ── 5. Cloud whole-word patterns ───────────────────────────
+    # ── 5. Cloud reasoning patterns ────────────────────────────
+    # Analytical intent (why/analyze/explain/architecture/should i)
+    # wins even when the query also mentions code.
     cloud_patterns = c_rules.get("patterns", [
-        r"\bwhy\b", r"\banalyze\b", r"\bexplain\b", r"\bcompare\b",
-        r"\bevaluate\b", r"\barchitecture\b", r"\bdesign pattern\b",
-        r"\bsecurity audit\b", r"\bperformance review\b", r"\bcode review\b",
-        r"\bsecurity review\b", r"\brefactor\b", r"\bdeploy\b",
-        r"\binfrastructure\b", r"\bentire codebase\b", r"\bfull project\b",
-        r"\bextract lesson\b", r"\blong context\b",
+        r"\bwhy\b", r"\bhow (does|do|come|would|should|can i)\b",
+        r"\banaly[sz]e\b", r"\banaly[sz]is\b", r"\bexplain\b",
+        r"\bcompare\b", r"\bevaluate\b", r"\bassess\b", r"\bdiagnose\b",
+        r"\broot cause\b", r"\barchitect(ure|ural)?\b",
+        r"\bsecurity (audit|review)\b", r"\bshould i\b",
+        r"\bbest (way|approach|practice)\b", r"\btrade-?offs?\b",
+        r"\bentire codebase\b", r"\bfull project\b",
     ])
     if _word_match(query, cloud_patterns):
         return BrainTier.CLOUD
 
-    # ── 6. Code queries → Cursor tier ────────────────────────
-    code_kws = [
-        "class", "function", "bug", "error", "fix", "code", "refactor",
-        "import", "module", "component", "api", "endpoint", "database",
-        "deploy", "build", "test", "lint", "typescript", "react", "node",
-        "python", "fastapi", "pm2", "nginx", "webpack", "vite",
-    ]
-    if any(kw in ql for kw in code_kws):
-        char_limit = e_rules.get("code_char_limit", 200)
-        if len(query) < char_limit and "?" in query:
-            return BrainTier.EDGE  # trivial code question → local
+    # ── 6. Cursor code/ops patterns ────────────────────────────
+    cursor_patterns = cur_rules.get("patterns", [])
+    if _word_match(query, cursor_patterns):
+        char_limit = e_rules.get("code_char_limit", 120)
+        if len(query) < char_limit and "?" in query and not _is_actionable(ql):
+            return BrainTier.EDGE  # trivial short code lookup -> local
         return BrainTier.CURSOR
 
-    # ── 7. Default ─────────────────────────────────────────────
+    # ── 7. Generic code keyword fallback ───────────────────────
+    code_kws = cur_rules.get("keywords", [
+        "function", "class", "bug", "error", "fix", "code", "refactor",
+        "import", "module", "component", "api", "endpoint", "database",
+        "deploy", "build", "test", "lint", "typescript", "react", "node",
+        "fastapi", "pm2", "webpack", "vite", "pnpm",
+    ])
+    if any(kw in ql for kw in code_kws):
+        char_limit = e_rules.get("code_char_limit", 120)
+        if len(query) < char_limit and "?" in query and not _is_actionable(ql):
+            return BrainTier.EDGE  # trivial code question -> local
+        return BrainTier.CURSOR
+
+    # ── 8. Default ─────────────────────────────────────────────
     return BrainTier.HYBRID
+
+
+def _is_actionable(ql: str) -> bool:
+    """True if the query asks Jarvis to DO something to code/infra (not just look up)."""
+    action_verbs = (
+        "fix", "refactor", "rewrite", "implement", "deploy", "redeploy",
+        "rollback", "add", "create", "write", "build", "review", "debug",
+        "migrate", "restart", "merge", "update", "change", "remove", "delete",
+    )
+    return any(re.search(rf"\b{v}\b", ql) for v in action_verbs)
 
 
 def log_routing_decision(
@@ -199,13 +230,36 @@ def log_routing_decision(
 _ollama_lock = threading.Semaphore(1)
 
 
+def _persona_block() -> str:
+    """Dense system-prompt persona block (Sir rule, forbidden openers, projects, priorities)."""
+    try:
+        from profile import profile_prompt_block
+        block = profile_prompt_block()
+        if block:
+            return block
+    except Exception as exc:
+        log.debug("persona block unavailable: %s", exc)
+    # Minimal fallback so the Sir/persona contract never silently disappears.
+    return (
+        "You are Jarvis, Sir Mike Samuel's personal AI brain. Address him ALWAYS as 'Sir'. "
+        "Direct, minimal, senior-dev depth; under 200 words unless asked. "
+        "Never open with 'Certainly!', 'Of course!', 'Sure!', or 'Absolutely!'. "
+        "Be proactive — flag risks. Keep services up; the payment gateway is money-critical."
+    )
+
+
 def query_edge(query: str, rag_context: str, history: list[dict] | None = None) -> str:
     """Local Ollama — zero cost, zero latency."""
     import ollama
 
     cfg = _load_config()
     ollama_cfg = cfg.get("ollama", {})
-    opts = ollama_cfg.get("options", {"num_ctx": 8192, "num_keep": 256, "num_predict": 1024, "temperature": 0.3})
+    opts = dict(ollama_cfg.get("options", {}))
+    # Enforce 6GB-VRAM-safe ceiling regardless of config drift.
+    opts.setdefault("num_keep", 256)
+    opts.setdefault("num_predict", 1024)
+    opts.setdefault("temperature", 0.3)
+    opts["num_ctx"] = min(int(opts.get("num_ctx", 2048)), 2048)
 
     ql = query.lower()
     # Vision: contains image description request
@@ -218,14 +272,10 @@ def query_edge(query: str, rag_context: str, history: list[dict] | None = None) 
     else:
         model = ollama_cfg.get("models", {}).get("reasoning", "deepseek-r1:7b")
 
-    profile = _load_profile()
-    prompt = f"""You are Jarvis, Mike's personal AI assistant.
+    prompt = f"""{_persona_block()}
 
-Mike's Profile: {json.dumps(profile, ensure_ascii=False)[:1000]}
-Relevant Context from Memory: {rag_context[:2000]}
-Query: {query}
-
-Be direct and concise. Senior-dev technical depth. No lectures."""
+Relevant Context from Memory: {rag_context[:1500]}
+Query: {query}"""
 
     messages = []
     if history:
@@ -256,17 +306,12 @@ def query_cloud(
 
     _check_privacy(query)
 
-    profile = _load_profile()
     system_parts = [
-        "You are Jarvis 2.0, Mike's AI assistant.",
-        f"Mike's Profile:\n{yaml.dump(profile, allow_unicode=True)[:800]}",
+        _persona_block(),
         f"Local Memory Context:\n{rag_context[:3000]}",
     ]
     if full_files:
         system_parts.append(f"Codebase:\n{full_files[:10000]}")
-    system_parts.append(
-        "Be direct. Senior-dev technical depth. Suggest specific local actions when relevant."
-    )
 
     client = get_client()
     t0 = time.time()

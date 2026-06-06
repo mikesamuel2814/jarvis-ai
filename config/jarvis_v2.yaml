@@ -24,7 +24,7 @@ ollama:
     vision: "llava:7b"
     embedding: "mxbai-embed-large"
   options:
-    num_ctx: 8192
+    num_ctx: 2048        # 6GB VRAM ceiling — do NOT raise until hardware upgrade
     num_keep: 256
     num_predict: 1024
     temperature: 0.3

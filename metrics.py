@@ -31,18 +31,72 @@ def _count_jsonl(path: Path, filter_type: str | None = None) -> int:
     return count
 
 
-def _count_routing(tier: str) -> int:
-    path = JARVIS_HOME / "data" / "routing_decisions.jsonl"
+def _iter_jsonl(path: Path):
     if not path.exists():
-        return 0
-    count = 0
+        return
     for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            if json.loads(line).get("tier") == tier:
-                count += 1
+            yield json.loads(line)
         except json.JSONDecodeError:
-            pass
+            continue
+
+
+def _routing_summary() -> dict:
+    """Per-tier counts + avg latency from routing_decisions.jsonl."""
+    counts = {"edge": 0, "hybrid": 0, "cloud": 0}
+    lat_sum = {"edge": 0.0, "hybrid": 0.0, "cloud": 0.0}
+    lat_n = {"edge": 0, "hybrid": 0, "cloud": 0}
+    overall_lat_sum = 0.0
+    overall_lat_n = 0
+    for d in _iter_jsonl(JARVIS_HOME / "data" / "routing_decisions.jsonl"):
+        tier = d.get("tier", "hybrid")
+        if tier not in counts:
+            tier = "hybrid"
+        counts[tier] += 1
+        lat = d.get("latency_ms")
+        if isinstance(lat, (int, float)):
+            lat_sum[tier] += lat
+            lat_n[tier] += 1
+            overall_lat_sum += lat
+            overall_lat_n += 1
+    avg_latency = {
+        t: round(lat_sum[t] / lat_n[t], 1) if lat_n[t] else 0.0 for t in counts
+    }
+    avg_latency["overall"] = (
+        round(overall_lat_sum / overall_lat_n, 1) if overall_lat_n else 0.0
+    )
+    return {"counts": counts, "avg_latency_ms": avg_latency}
+
+
+def _count_routing(tier: str) -> int:
+    count = 0
+    for d in _iter_jsonl(JARVIS_HOME / "data" / "routing_decisions.jsonl"):
+        if d.get("tier") == tier:
+            count += 1
     return count
+
+
+def _feedback_summary() -> dict:
+    """👍/👎 counts + ratio from interactions.jsonl (rating updated in place)."""
+    up = down = unrated = 0
+    for it in _iter_jsonl(JARVIS_HOME / "data" / "interactions.jsonl"):
+        r = it.get("rating")
+        if r == "good":
+            up += 1
+        elif r == "bad":
+            down += 1
+        else:
+            unrated += 1
+    rated = up + down
+    return {
+        "thumbs_up": up,
+        "thumbs_down": down,
+        "unrated": unrated,
+        "up_ratio": round(up / rated, 3) if rated else 0.0,
+    }
 
 
 def _chroma_count() -> int:
@@ -78,10 +132,13 @@ def dashboard() -> dict:
     corrections  = JARVIS_HOME / "data" / "corrections.jsonl"
     decisions    = JARVIS_HOME / "data" / "routing_decisions.jsonl"
 
-    edge   = _count_routing("edge")
-    hybrid = _count_routing("hybrid")
-    cloud  = _count_routing("cloud")
-    total  = edge + hybrid + cloud
+    routing  = _routing_summary()
+    rc       = routing["counts"]
+    edge     = rc["edge"]
+    hybrid   = rc["hybrid"]
+    cloud    = rc["cloud"]
+    total    = edge + hybrid + cloud
+    feedback = _feedback_summary()
 
     return {
         "memory": {
@@ -97,10 +154,13 @@ def dashboard() -> dict:
             "cloud_queries":           cloud,
             "edge_pct":                round(edge / max(total, 1) * 100, 1),
             "cloud_pct":               round(cloud / max(total, 1) * 100, 1),
+            "avg_latency_ms":          routing["avg_latency_ms"],
         },
+        "feedback": feedback,
         "learning": {
             "total_interactions":    _count_jsonl(interactions),
             "queue_size":            _count_jsonl(queue),
+            "lessons_learned":       _count_jsonl(lessons),
             "sync_status":           _sync_status(),
         },
         "cost": _kimi_cost(),

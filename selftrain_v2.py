@@ -165,9 +165,73 @@ def evolve_routing_rules() -> dict:
     return {"status": "updated" if changed else "no_change", "cloud_pct": round(cloud_pct, 2)}
 
 
+def re_extract_lessons() -> dict:
+    """Full lesson re-extraction cycle (owned by the learning workstream).
+
+    Re-runs learner.run_learning() so every correction / golden / 👎 signal is
+    (re)embedded into ChromaDB, then dedupes lessons.jsonl and prunes
+    low-value entries. Fully headless and crash-safe.
+    """
+    log.info("Step: Re-extracting lessons into ChromaDB...")
+    result: dict = {}
+    try:
+        import learner  # noqa: PLC0415
+        learner.run_learning()
+        result["learner"] = "ok"
+    except Exception as e:
+        log.error("learner.run_learning failed: %s", e)
+        result["learner"] = f"error: {str(e)[:120]}"
+
+    # Dedupe + prune lessons.jsonl
+    try:
+        result["lessons"] = _dedupe_and_prune_lessons()
+    except Exception as e:
+        log.error("Lesson dedupe/prune failed: %s", e)
+        result["lessons"] = {"status": "error", "error": str(e)[:120]}
+    return result
+
+
+def _dedupe_and_prune_lessons() -> dict:
+    """Dedupe lessons.jsonl by principle text; drop empty / low-value entries."""
+    lessons_path = JARVIS_HOME / "data" / "lessons.jsonl"
+    if not lessons_path.exists():
+        return {"status": "no_lessons", "kept": 0, "removed": 0}
+
+    seen: set[str] = set()
+    kept: list[str] = []
+    removed = 0
+    for line in lessons_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            removed += 1
+            continue
+        principle = (obj.get("principle") or obj.get("text") or "").strip()
+        if len(principle) < 8:          # low-value / empty
+            removed += 1
+            continue
+        key = principle.lower()
+        if key in seen:                 # duplicate
+            removed += 1
+            continue
+        seen.add(key)
+        kept.append(json.dumps(obj))
+
+    lessons_path.write_text("\n".join(kept) + ("\n" if kept else ""))
+    log.info("Lessons deduped: %d kept, %d removed.", len(kept), removed)
+    return {"status": "ok", "kept": len(kept), "removed": removed}
+
+
 def compress_memory() -> dict:
     log.info("Step 5: Compressing memory...")
-    from memory.compressor import compress
+    try:
+        from memory.compressor import compress  # noqa: PLC0415
+    except Exception as e:
+        log.warning("memory.compressor unavailable (%s) — skipping compression.", e)
+        return {"status": "skipped", "reason": "compressor_unavailable"}
     return compress()
 
 
@@ -190,12 +254,21 @@ def main() -> None:
     results = {}
     t0 = time.time()
 
-    results["reindex"]  = full_reindex()
-    results["review"]   = kimi_codebase_review()
-    results["skills"]   = generate_skills()
-    results["routing"]  = evolve_routing_rules()
-    results["compress"] = compress_memory()
-    results["sync"]     = sync_openclaw()
+    def _safe(name: str, fn):
+        """Run a step; never let one failure abort the weekly cron."""
+        try:
+            results[name] = fn()
+        except Exception as e:
+            log.error("Step %s failed: %s", name, e)
+            results[name] = {"status": "error", "error": str(e)[:200]}
+
+    _safe("reindex",  full_reindex)
+    _safe("lessons",  re_extract_lessons)   # owned: re-extract + dedupe + prune
+    _safe("review",   kimi_codebase_review)
+    _safe("skills",   generate_skills)
+    _safe("routing",  evolve_routing_rules)
+    _safe("compress", compress_memory)
+    _safe("sync",     sync_openclaw)
 
     elapsed = time.time() - t0
     log.info("Evolution complete in %.0f seconds.", elapsed)
