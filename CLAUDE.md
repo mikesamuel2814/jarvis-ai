@@ -1,8 +1,44 @@
-# Jarvis Autonomy System Architecture
+# Jarvis Autonomy + Auto Web Search System
 
-**Status:** ✅ Implemented and tested (June 6, 2026)
+**Status:** ✅ Fully implemented, tested, and running (June 6, 2026)
 
-This document describes Jarvis's autonomous decision-making system. Claude should understand this architecture when working on Jarvis code.
+This document describes Jarvis's autonomous decision-making and continuous self-training system.
+Claude MUST follow all rules in this file when working on Jarvis code.
+
+---
+
+## RULE SET — Claude Code Sessions
+
+### Auto Web Search Rules (for Claude)
+1. **Never disable or remove `web_search_trainer.py` integration** — it is the primary path by which Jarvis grows its knowledge base.
+2. **Privacy is absolute**: Never pass AsthaCash, Starline, .ssh, credentials, .env, secrets, private_key, admin93, VPS IPs through external search queries.
+3. **All web searches are background only** — `silent_search_and_train()` is non-blocking. Never call `force_search_and_train()` in the query path.
+4. **Rate limit is 3 searches per 10 min** — never bypass `_is_rate_limited()`.
+
+### Autonomy Rules (for Claude)
+1. **Never shorten the `always_ask` list** in skillset.json: `reboot`, `update_system`, `deploy_vps`, `shell`, `ssh_cmd` — these ALWAYS require explicit approval.
+2. **`pre_approved` actions** auto-execute without any user confirmation — only add safe, read-only, or service-restart actions.
+3. **`learned_safe` promotion** requires exactly 3 human approvals — never manually set it.
+4. **Always syntax-check Python files before restart** — use `python3 -m py_compile <file>`.
+
+### Brain/Learning Rules (for Claude)
+1. **Injection must be fast** — `brain_injector.get_injection()` uses 5s cache. Never block on external calls in this path.
+2. **All learning is non-blocking** — use daemon threads for ChromaDB upserts and rule extraction.
+3. **DeepSeek-R1:7b is the default local model** for rule extraction — never use a model >7B (6GB VRAM limit).
+4. **Cursor tier falls back to Cloud** when `cursor.query` module is unavailable — this is expected behavior.
+
+---
+
+## RULE SET — Jarvis Brain (injected into every prompt)
+
+Jarvis follows these standing rules at runtime (injected via `brain_injector.py`):
+
+1. **Auto web search**: When Jarvis lacks information (expresses uncertainty, says "I don't know", gives <80-char response), `web_search_trainer.py` silently searches the web and stores lessons in memory for the NEXT query.
+2. **Autonomy**: Pre-approved actions (disk, memory, gpu, nginx_status, pm2_status, restart_gateway, restart_starline) execute automatically without asking. `reboot`, `update_system`, `deploy_vps` ALWAYS require explicit approval.
+3. **Learning**: Every correction (/correct) immediately extracts a rule and injects it into the next prompt. Skill gaps identified during training are enriched via web search.
+4. **Privacy**: Never send Payment-Gateway, AsthaCash, Starline, SSH keys, or credentials to external services.
+
+---
 
 ## Overview
 
