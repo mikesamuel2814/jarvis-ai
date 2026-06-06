@@ -906,7 +906,7 @@ def main():
         facts[key] = val
         save_facts(facts)
         from fmt import bold, code, esc
-        await send(update, f"✅ Remembered: {bold(esc(key))} = {code(esc(val))}", already_html=True)
+        await send(update, f"✅ Remembered: {bold(esc(key))} = {code(val)}", already_html=True)
 
     async def actions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from executor import ACTIONS, AUTO, CONFIRM, APPROVE
@@ -1278,7 +1278,8 @@ def main():
                 f"Examples:\n"
                 f"  /web latest crypto market news\n"
                 f"  /web bitcoin price today\n"
-                f"  /web kali linux 2025 release"
+                f"  /web kali linux 2025 release",
+                already_html=True,
             )
             return
         thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir…")
@@ -1472,9 +1473,9 @@ def main():
         target = args[1] if len(args) > 1 else ""
         opts = " ".join(args[2:]) if len(args) > 2 else ""
         if not target:
-            from fmt import code, esc
+            from fmt import code
             await send(update,
-                f"Sir, I need a target.\nUsage: {code(f'/kali {esc(tool)} &lt;target&gt; [opts]')}",
+                f"Sir, I need a target.\nUsage: {code(f'/kali {tool} <target> [opts]')}",
                 already_html=True)
             return
 
@@ -1486,7 +1487,7 @@ def main():
             sc = validate_scope(target)
             if not sc.get("in_scope", True):
                 scope_warn = (
-                    f"⚠️ {bold('OUT OF SCOPE')} target {code(esc(target))} — "
+                    f"⚠️ {bold('OUT OF SCOPE')} target {code(target)} — "
                     f"{esc(sc.get('reason',''))}\nApproval will be required.\n\n"
                 )
         except Exception:
@@ -1498,7 +1499,7 @@ def main():
         await update.message.chat.send_action("typing")
         from fmt import code, esc
         await send(update,
-            f"{scope_warn}Sir, dispatching {code(esc(tool))} against {code(esc(target))}…",
+            f"{scope_warn}Sir, dispatching {code(tool)} against {code(target)}…",
             already_html=True)
 
         # Run the (potentially long) scan off the event loop so the bot stays responsive.
@@ -1538,8 +1539,8 @@ def main():
             size = st.st_size
             size_h = f"{size}B" if size < 1024 else (f"{size//1024}KB" if size < 1024*1024 else f"{size//(1024*1024)}MB")
             mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"  📄 {code(esc(p.name))} — {size_h}, {mtime}")
-        lines.append(f"\nRead one with {code('/exec read file &lt;path&gt;')} or open in the file viewer.")
+            lines.append(f"  📄 {code(p.name)} — {size_h}, {mtime}")
+        lines.append(f"\nRead one with {code('/exec read file <path>')} or open in the file viewer.")
         await send(update, "\n".join(lines), already_html=True)
 
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
