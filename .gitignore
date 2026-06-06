@@ -26,3 +26,6 @@ config/telegram.json
 # Jarvis 2.0 — never commit secrets or generated data
 config/secrets.env
 *.env
+scans/
+data/golden_examples.jsonl
+data/*.jsonl
