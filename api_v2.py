@@ -249,6 +249,12 @@ class ActionRequest(BaseModel):
     arg: str | None = None
 
 
+class AgentRequest(BaseModel):
+    task: str
+    max_steps: int = 6
+    allow_destructive: bool = False
+
+
 class FeedbackRequest(BaseModel):
     interaction_id: str
     rating: str  # "thumbs_up" | "thumbs_down"
@@ -344,6 +350,18 @@ async def query(req: QueryRequest):
         "interaction_id": interaction_id,
         "cached": False,
     }
+
+
+@app.post("/agent", dependencies=[Depends(require_api_key)])
+async def agent(req: AgentRequest):
+    """Autonomous agent loop — plain-English task → plan, act, observe, answer."""
+    from jarvis_agent import run_agent
+    result = run_agent(
+        task=req.task,
+        max_steps=req.max_steps,
+        allow_destructive=req.allow_destructive,
+    )
+    return result
 
 
 @app.get("/sysinfo", dependencies=[Depends(require_api_key)])

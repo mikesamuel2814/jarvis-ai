@@ -2027,6 +2027,56 @@ def main():
         except Exception as e:
             await thinking_msg.edit_text(f"❌ Error: {e}")
 
+    async def do_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Autonomous agent: /do <task> — Jarvis plans, runs safe actions, reports back."""
+        uid = update.effective_user.id
+        _cache_chat_id(uid)
+        if not _is_authorized(uid):
+            return
+        task = " ".join(context.args).strip() if context.args else ""
+        if not task:
+            await send(update, "Sir, give me a task: `/do <what you want done>`\n"
+                               "Example: `/do check if the payment gateway is running`")
+            return
+        thinking_msg = await update.message.reply_text("🤖 On it, Sir — working…")
+        try:
+            r = requests.post(
+                f"{API_BASE}/agent",
+                json={"task": task, "max_steps": 6, "allow_destructive": True},
+                headers=_ah(),
+                timeout=180,
+            )
+            if not r.ok:
+                await thinking_msg.edit_text(f"❌ Agent failed: {r.status_code}")
+                return
+            d = r.json()
+            answer = d.get("answer", "")
+            actions = d.get("actions_run", [])
+            elapsed = d.get("elapsed", 0)
+            needs = d.get("needs_approval")
+
+            footer = ""
+            if actions:
+                footer += f"\n\n_Ran: {', '.join(actions)} · {elapsed}s_"
+            if needs:
+                # Create the approval request so Mike can tap to authorize
+                try:
+                    ar = requests.post(
+                        f"{API_BASE}/action",
+                        json={"action": needs, "arg": "", "silent": True},
+                        headers=_ah(), timeout=10,
+                    )
+                    rid = ar.json().get("request_id", "")
+                    if rid:
+                        footer += f"\n\n⚡ Approve to continue: `/approve {rid}`"
+                except Exception:
+                    pass
+
+            await thinking_msg.delete()
+            await send(update, answer + footer)
+        except Exception as e:
+            await thinking_msg.edit_text(f"❌ Error: {e}")
+
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
         _cache_chat_id(uid)
@@ -2274,6 +2324,7 @@ def main():
     app_bot.add_handler(CommandHandler("objectives", objectives_cmd))
     app_bot.add_handler(CommandHandler("briefing",   briefing_cmd))
     app_bot.add_handler(CommandHandler("think",      think_cmd))
+    app_bot.add_handler(CommandHandler("do",         do_cmd))
     app_bot.add_handler(CommandHandler("benchmark",  benchmark_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
