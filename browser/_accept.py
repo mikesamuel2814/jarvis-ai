@@ -1,5 +1,9 @@
-import sys
+import sys, time
 sys.path.insert(0, "/home/kali/.jarvis")
+# optional pre-delay to space out Google searches (avoid rate-limit) when
+# running the acceptance test back-to-back-to-back.
+if len(sys.argv) > 1:
+    time.sleep(int(sys.argv[1]))
 from browser.agent import BrowserAgent
 a = BrowserAgent.get()
 r = a.google_search('bitcoin price today', num=3)

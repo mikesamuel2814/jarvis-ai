@@ -284,75 +284,86 @@ class BrowserAgent:
         """
         Open Google, search, parse organic results.
         Returns list of {title, url, snippet}.
+
+        Like open_url(), a renderer "tab crashed" on the results page is
+        recovered by recreating a fresh driver and retrying once.
         """
         with self._driver_lock:
-            self._ensure_driver()
-            try:
-                from selenium.webdriver.common.by import By
-                from selenium.webdriver.common.keys import Keys
-                from selenium.webdriver.support import expected_conditions as EC
-                from selenium.webdriver.support.ui import WebDriverWait
-
-                search_url = f"https://www.google.com/search?q={_encode(query)}&hl=en&num={num}"
-                self._driver.get(search_url)
-                time.sleep(2)
-
-                results = []
-
-                # Accept cookie banner if present (EU)
+            for attempt in range(1, _MAX_ATTEMPTS + 1):
+                self._ensure_driver(force=(attempt > 1))
                 try:
-                    btn = self._driver.find_element(By.XPATH, '//button[contains(.,"Accept all")]')
-                    btn.click()
-                    time.sleep(1)
+                    return self._google_search_once(query, num)
+                except Exception as exc:
+                    if attempt < _MAX_ATTEMPTS and _is_crash(exc):
+                        log.warning(
+                            "google_search('%s') renderer crash (attempt %d/%d: %s) "
+                            "— retrying with fresh driver",
+                            query, attempt, _MAX_ATTEMPTS, str(exc).splitlines()[0],
+                        )
+                        continue
+                    log.error("google_search failed: %s", exc)
+                    return []
+            return []
+
+    def _google_search_once(self, query: str, num: int) -> list[dict]:
+        from selenium.webdriver.common.by import By
+
+        search_url = f"https://www.google.com/search?q={_encode(query)}&hl=en&num={num}"
+        self._driver.get(search_url)
+        time.sleep(2)
+
+        results: list[dict] = []
+
+        # Accept cookie banner if present (EU)
+        try:
+            btn = self._driver.find_element(By.XPATH, '//button[contains(.,"Accept all")]')
+            btn.click()
+            time.sleep(1)
+        except Exception:
+            pass
+
+        # Organic result cards: div[data-hveid] or h3 parent anchors
+        cards = self._driver.find_elements(By.CSS_SELECTOR, "div.g, div[data-hveid]")
+        for card in cards[:num * 2]:
+            try:
+                a = card.find_element(By.CSS_SELECTOR, "a[href]")
+                href = a.get_attribute("href") or ""
+                if not href.startswith("http"):
+                    continue
+                if "google.com" in href:
+                    continue
+                title = ""
+                try:
+                    title = card.find_element(By.CSS_SELECTOR, "h3").text
+                except Exception:
+                    title = a.text[:80]
+                snippet = ""
+                try:
+                    snippet = card.find_element(
+                        By.CSS_SELECTOR, "div[data-sncf], div.VwiC3b, span.aCOpRe, div.IsZvec"
+                    ).text[:300]
                 except Exception:
                     pass
+                if href and title:
+                    results.append({"title": title, "url": href, "snippet": snippet})
+                    if len(results) >= num:
+                        break
+            except Exception:
+                continue
 
-                # Organic result cards: div[data-hveid] or h3 parent anchors
-                cards = self._driver.find_elements(By.CSS_SELECTOR, "div.g, div[data-hveid]")
-                for card in cards[:num * 2]:
-                    try:
-                        a = card.find_element(By.CSS_SELECTOR, "a[href]")
-                        href = a.get_attribute("href") or ""
-                        if not href.startswith("http"):
-                            continue
-                        if "google.com" in href:
-                            continue
-                        title = ""
-                        try:
-                            title = card.find_element(By.CSS_SELECTOR, "h3").text
-                        except Exception:
-                            title = a.text[:80]
-                        snippet = ""
-                        try:
-                            snippet = card.find_element(
-                                By.CSS_SELECTOR, "div[data-sncf], div.VwiC3b, span.aCOpRe, div.IsZvec"
-                            ).text[:300]
-                        except Exception:
-                            pass
-                        if href and title:
-                            results.append({"title": title, "url": href, "snippet": snippet})
-                            if len(results) >= num:
-                                break
-                    except Exception:
-                        continue
+        if not results:
+            # Fallback: grab all h3 + parent href
+            for h3 in self._driver.find_elements(By.TAG_NAME, "h3")[:num]:
+                try:
+                    a = h3.find_element(By.XPATH, "..")
+                    href = a.get_attribute("href") or ""
+                    if href.startswith("http") and "google.com" not in href:
+                        results.append({"title": h3.text, "url": href, "snippet": ""})
+                except Exception:
+                    continue
 
-                if not results:
-                    # Fallback: grab all h3 + parent href
-                    for h3 in self._driver.find_elements(By.TAG_NAME, "h3")[:num]:
-                        try:
-                            a = h3.find_element(By.XPATH, "..")
-                            href = a.get_attribute("href") or ""
-                            if href.startswith("http") and "google.com" not in href:
-                                results.append({"title": h3.text, "url": href, "snippet": ""})
-                        except Exception:
-                            continue
-
-                log.info("google_search('%s'): %d results", query, len(results))
-                return results
-
-            except Exception as exc:
-                log.error("google_search failed: %s", exc)
-                return []
+        log.info("google_search('%s'): %d results", query, len(results))
+        return results
 
     # ── Page actions ──────────────────────────────────────────────────
 

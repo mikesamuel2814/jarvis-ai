@@ -675,7 +675,23 @@ def _format_action_output(action: str, output: str) -> str:
 
 
 def run_action_via_api(action: str, arg: str = "") -> str:
-    """Call the Jarvis API to execute an action."""
+    """Execute an action — OpenClaw first (read/introspection), executor fallback.
+
+    OpenClaw's HTTP gateway safely serves read/introspection tools and hard-denies
+    shell/mutating actions, so we try it first and fall back to the tiered executor
+    (/action) for anything it doesn't serve. This keeps mutating actions on the
+    permission-gated executor path while letting OpenClaw handle live introspection.
+    """
+    try:
+        from openclaw.bridge import run_action as oc_run_action
+        oc = oc_run_action(action, {"arg": arg} if arg else None)
+        if oc.get("ok"):
+            out = oc.get("output", "") or "Done."
+            return f"✅ {_format_action_output(action, out)}"
+        # ok=False with fallback=True → fall through to executor below
+    except Exception as e:
+        log.debug("OpenClaw run_action skipped for %s: %s", action, e)
+
     try:
         resp = requests.post(
             f"{API_BASE}/action",
@@ -1122,6 +1138,31 @@ def main():
         except Exception as e:
             await thinking_msg.edit_text(f"Browse error: {e}")
 
+    async def oc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """OpenClaw gateway — status or direct tool invoke.
+        /oc            → gateway health
+        /oc <tool>     → invoke an OpenClaw tool (e.g. /oc sessions_list)
+        """
+        args = context.args or []
+        try:
+            from openclaw import bridge as oc
+            if not args:
+                up = oc.openclaw_available()
+                icon = "🟢" if up else "🔴"
+                await send(update, f"{icon} OpenClaw gateway: {'live' if up else 'unavailable'}, Sir.")
+                return
+            tool = args[0]
+            tool_args = {"arg": " ".join(args[1:])} if len(args) > 1 else None
+            await update.message.chat.send_action("typing")
+            res = oc.tool_invoke(tool, tool_args)
+            if res.get("ok"):
+                out = res.get("output", "") or "Done."
+                await send(update, f"✅ *{tool}*\n{out[:3500]}")
+            else:
+                await send(update, f"❌ {tool}: {res.get('reason', 'failed')}")
+        except Exception as e:
+            await send(update, f"OpenClaw error: {e}")
+
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
@@ -1284,6 +1325,8 @@ def main():
     app_bot.add_handler(CommandHandler("web", web_cmd))
     app_bot.add_handler(CommandHandler("search", web_cmd))
     app_bot.add_handler(CommandHandler("browse", browse_cmd))
+    app_bot.add_handler(CommandHandler("oc", oc_cmd))
+    app_bot.add_handler(CommandHandler("openclaw", oc_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
