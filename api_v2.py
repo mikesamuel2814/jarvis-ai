@@ -122,10 +122,18 @@ async def cache_request_body(request: Request, call_next):
 # ── RAG helper ──────────────────────────────────────────────────────
 
 def _embed_query(text: str) -> list[float] | None:
-    """Embed text with mxbai-embed-large via Ollama (1024-dim, matches collection)."""
+    """Embed text with mxbai-embed-large via Ollama (1024-dim, matches collection).
+    keep_alive=0 tells Ollama to unload mxbai immediately after embedding so the
+    6GB VRAM is free for the subsequent chat model (deepseek-r1:7b)."""
     try:
-        import ollama as _ollama
-        return _ollama.embeddings(model="mxbai-embed-large", prompt=text[:4096])["embedding"]
+        import requests as _req
+        resp = _req.post(
+            "http://localhost:11434/api/embeddings",
+            json={"model": "mxbai-embed-large", "prompt": text[:4096], "keep_alive": 0},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["embedding"]
     except Exception as e:
         log.warning("Embedding failed: %s", e)
         return None
