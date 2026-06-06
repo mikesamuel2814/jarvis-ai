@@ -570,21 +570,26 @@ HELP_TEXT = (
     "/selfcheck — Full system self-check\n\n"
     "━━━ <b>🔍 Web &amp; Research</b> ━━━\n"
     "/web <i>query</i> — Real-time web search + AI answer\n"
+    "/search <i>query</i> — Alias for /web\n"
     "/weather <i>[city]</i> — Current weather\n"
     "/browse <i>url</i> — Open URL in headless browser\n\n"
     "━━━ <b>⚡ Actions &amp; Tasks</b> ━━━\n"
     "/exec <i>cmd</i> — Smart dispatch (plan + execute)\n"
     "/task <i>desc</i> — Delegate to Claude Code (async)\n"
-    "/actions — List available actions\n"
+    "/actions — List available actions by tier\n"
     "/pending — Show pending approvals\n"
     "/approve <i>ID</i> — Approve a pending action\n"
     "/deny <i>ID</i> — Deny a pending action\n\n"
     "━━━ <b>🛡 Security (Kali)</b> ━━━\n"
-    "/kali <i>tool target</i> — Run pentest tool\n"
+    "/kali — List all pentest tools (L1–L4)\n"
+    "/kali <i>tool target</i> — Run a pentest tool\n"
     "/scans — List recent scan reports\n\n"
+    "━━━ <b>🌐 OpenClaw</b> ━━━\n"
+    "/oc — OpenClaw gateway status\n"
+    "/oc <i>tool [args]</i> — Invoke an OpenClaw tool\n\n"
     "━━━ <b>🧪 Self-Test &amp; Diagnostics</b> ━━━\n"
-    "/probe <i>[question]</i> — Test phi4-mini (timing + tokens)\n"
-    "/skills — Actions, memory chunks, loaded models\n"
+    "/probe <i>[question]</i> — Test local AI (timing + tokens)\n"
+    "/skills — Actions count, memory chunks, loaded models\n"
     "/recall <i>[topic]</i> — What Jarvis remembers about you\n"
     "/objectives — Your profile, projects &amp; Jarvis goals\n"
     "/benchmark <i>[q]</i> — All 3 models side-by-side\n\n"
@@ -595,8 +600,8 @@ HELP_TEXT = (
     "━━━ <b>⚙️ Settings</b> ━━━\n"
     "/remember <i>key value</i> — Save a personal fact\n"
     "/voice on|off — Toggle voice audio responses\n"
-    "/new — Fresh session (clear history)\n"
-    "/clear — Clear chat history\n"
+    "/new — Fresh session (clear history + state)\n"
+    "/clear — Clear chat history only\n"
     "/help — Show this message\n\n"
     "<i>💡 Tip: Tap 👍 or 👎 after any reply to train Jarvis.</i>\n"
     "<i>Drop files into ~/.jarvis/inbox/ to auto-train from them.</i>"
@@ -855,7 +860,7 @@ def run_action_via_api(action: str, arg: str = "") -> str:
             f"{API_BASE}/action",
             json={"action": action, "arg": arg},
             headers=_ah(),
-            timeout=90,
+            timeout=300,
         )
         d = resp.json()
         if d.get("status") == "pending":
@@ -1041,11 +1046,22 @@ def main():
         from fmt import bold, code, esc
         lines = [f"⚡ {bold('Available Actions')}\n"]
         for tier, label, icon in [(AUTO, "Auto", "⚡"), (CONFIRM, "Confirm", "🔔"), (APPROVE, "Approve", "🔐")]:
-            items = [f"  {icon} {code(k)} — {esc(v['desc'])}" for k, v in ACTIONS.items() if v["tier"] == tier]
+            items = [
+                f"  {icon} {code(k)} — {esc(v['desc'])}"
+                for k, v in ACTIONS.items()
+                if v["tier"] == tier and not k.startswith("kali_")
+            ]
             if items:
                 lines.append(bold(f"{icon} {label}"))
                 lines.extend(items)
                 lines.append("")
+        # Kali tools summary — full catalogue via /kali
+        kali_auto  = [k for k, v in ACTIONS.items() if k.startswith("kali_") and v["tier"] == AUTO]
+        kali_appr  = [k for k, v in ACTIONS.items() if k.startswith("kali_") and v["tier"] == APPROVE]
+        lines.append(bold("🛡 Kali Pentest Tools"))
+        lines.append(f"  ⚡ {len(kali_auto)} passive recon  🔐 {len(kali_appr)} active/exploit")
+        lines.append(f"  Use {code('/kali')} for the full tool catalogue grouped by level.")
+        lines.append("")
         text = "\n".join(lines)
         B = InlineKeyboardButton
         quick_keyboard = InlineKeyboardMarkup([
@@ -1700,10 +1716,10 @@ def main():
                 await send(update, "⚠️ Sorry Sir, the Kali tools module is not available. Check that kali_tools.py is installed.")
                 return
             level_names = {
-                1: "🔍 L1 Recon (passive, auto)",
-                2: "📡 L2 Scan/Enum (active, approval)",
-                3: "🌐 L3 Web (active, approval)",
-                4: "💥 L4 Intrusive/Exploit (approval)",
+                1: "🔍 L1 Recon (passive, ⚡ auto)",
+                2: "📡 L2 Scan/Enum (active, 🔐 approve)",
+                3: "🌐 L3 Web (active, 🔐 approve)",
+                4: "💥 L4 Intrusive/Exploit (🔐 approve)",
             }
             by_level: dict[int, list] = {}
             for t in tools:

@@ -91,8 +91,8 @@ ACTIONS: dict[str, dict] = {
     "git_pull_sl":       {"desc": "git pull Starline-Final-web",   "cmd": "git -C /home/kali/Projects/kalimike/Starline-Final-web pull",                                                                            "tier": CONFIRM},
     "npm_install_gw":    {"desc": "npm install gateway-admin",     "cmd": "cd /home/kali/Projects/kalimike/Payment-Gateway/gateway-admin && npm install --legacy-peer-deps",                                        "tier": CONFIRM},
     "pnpm_install_sl":   {"desc": "pnpm install Starline",         "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm install",                                                                     "tier": CONFIRM},
-    "npm_build_gw":      {"desc": "npm build gateway-admin",       "cmd": "cd /home/kali/Projects/kalimike/Payment-Gateway/gateway-admin && npm run build",                                                         "tier": CONFIRM},
-    "pnpm_build_sl":     {"desc": "pnpm build Starline frontend",  "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm run build",                                                                   "tier": CONFIRM},
+    "npm_build_gw":      {"desc": "npm build gateway-admin",       "cmd": "cd /home/kali/Projects/kalimike/Payment-Gateway/gateway-admin && npm run build",                                                         "tier": CONFIRM, "timeout": 300},
+    "pnpm_build_sl":     {"desc": "pnpm build Starline frontend",  "cmd": "cd /home/kali/Projects/kalimike/Starline-Final-web && pnpm run build",                                                                   "tier": CONFIRM, "timeout": 300},
 
     # ── VPS management (confirm) ─────────────────────────────────────────────
     "vps_git_pull_gw":   {"desc": "git pull Payment-Gateway on VPS","cmd": "ssh -o StrictHostKeyChecking=no admin93@38.47.35.16 'cd ~/Payment-Gateway && git pull 2>&1'",                                          "tier": CONFIRM},
@@ -107,7 +107,7 @@ ACTIONS: dict[str, dict] = {
     "claude_task":       {"desc": "Run a Claude Code task (background, results via Telegram)", "cmd": None,                     "tier": APPROVE},
     "file_write":        {"desc": "Write content to a local file (path:content as arg)",       "cmd": None,                     "tier": APPROVE},
     "reboot":            {"desc": "Reboot Kali machine",           "cmd": "sudo -n reboot",                                     "tier": APPROVE},
-    "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo -n apt update && sudo -n apt upgrade -y",      "tier": APPROVE},
+    "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo -n apt update && sudo -n DEBIAN_FRONTEND=noninteractive apt upgrade -y", "tier": APPROVE, "timeout": 600},
 }
 
 # ── Kali pentest tools (authorized security testing) ──────────────────────────
@@ -340,7 +340,8 @@ def run_action(action_name: str, arg: str = "", approved: bool = False) -> dict:
             cmd = entry["cmd"]
             if "{arg}" in cmd:
                 cmd = cmd.replace("{arg}", shlex.quote(arg))
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            _timeout = entry.get("timeout", 60)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=_timeout)
             output = (result.stdout + result.stderr).strip()
             _audit(f"DONE {action_name} exit={result.returncode}")
             return {"success": result.returncode == 0, "output": output[:3000], "action": action_name, "tier": tier}
@@ -606,9 +607,14 @@ def _run_kali(action_name: str, arg: str = "", approved: bool = False) -> dict:
     report_path = res.get("report_path", "")
     in_scope = res.get("in_scope", scope.get("in_scope", True))
 
+    # L1 passive tools (whois, dig, nslookup, host) are human-readable — skip LLM
+    # interpretation to avoid 60-90s blocking delay on simple recon queries.
+    _L1_PASSIVE = {"whois", "dig", "nslookup", "host", "searchsploit", "nmap_ping"}
+    skip_interpret = tool in _L1_PASSIVE
+
     # AI interpretation of the findings (best-effort).
     interpreted = summary
-    if _kali_ai is not None:
+    if _kali_ai is not None and not skip_interpret:
         try:
             raw = summary
             if report_path and Path(report_path).exists():
