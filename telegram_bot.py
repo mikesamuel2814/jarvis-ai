@@ -553,12 +553,23 @@ def _fmt_services(raw: str) -> str:
 
 
 def _fmt_gpu(raw: str) -> str:
-    lines, out = raw.splitlines(), []
-    for line in lines:
-        l = line.strip()
-        if any(k in l for k in ("Driver", "CUDA", "GPU 0", "MiB", "WAT", "%", "Temp")):
-            out.append(l)
-    return "\n".join(out[:12]) if out else raw
+    temp = util = vram_used = vram_total = power = fan = None
+    for line in raw.splitlines():
+        # Stats row: | Fan  Temp  Perf  Pwr:Usage/Cap | Memory-Usage | GPU-Util |
+        m = re.search(r'(\d+)%\s+(\d+)C.*?(\d+)W\s*/\s*(\d+)W.*?(\d+)MiB\s*/\s*(\d+)MiB.*?(\d+)%', line)
+        if m:
+            fan, temp, power, max_power = m.group(1), m.group(2), m.group(3), m.group(4)
+            vram_used, vram_total, util = m.group(5), m.group(6), m.group(7)
+            break
+    if temp:
+        vram_pct = round(int(vram_used) / max(int(vram_total), 1) * 100)
+        return (
+            f"*GPU — RTX 3050*\n"
+            f"  Util  `{util}%` {_bar(int(util))}\n"
+            f"  VRAM  `{vram_used}/{vram_total} MB` {_bar(vram_pct)}\n"
+            f"  Temp  `{temp}°C`  Power `{power}/{max_power}W`  Fan `{fan}%`"
+        )
+    return raw
 
 
 def _fmt_network(raw: str) -> str:
@@ -869,7 +880,8 @@ def main():
                     icon = "✅" if overall == "ok" else "⚠️"
                     lines = [f"{icon} *Jarvis Self-Check* — {overall.upper()}\n"]
                     for k, v in d.get("checks", {}).items():
-                        ci = "✅" if str(v) in ("ok", "True") else ("⚠️" if str(v).isdigit() else "❌")
+                        sv = str(v)
+                        ci = "✅" if sv in ("ok", "True") or sv.replace(".", "").isdigit() else "❌"
                         lines.append(f"{ci} `{k}`: {v}")
                     reply = "\n".join(lines)
                 except Exception as e:
