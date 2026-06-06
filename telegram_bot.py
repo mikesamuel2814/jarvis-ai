@@ -1999,6 +1999,8 @@ def main():
         BotCommand("voice",     "Toggle voice audio responses"),
         BotCommand("new",       "Fresh session — clear history, ready for new instructions"),
         BotCommand("clear",     "Clear chat history"),
+        BotCommand("approve",   "Approve a pending action by ID"),
+        BotCommand("deny",      "Deny a pending action by ID"),
     ]
 
     async def _post_init(application):
