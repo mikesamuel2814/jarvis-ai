@@ -43,6 +43,26 @@ Jarvis follows these standing rules at runtime (injected via `brain_injector.py`
 
 ---
 
+## Jarvis Agent — Autonomous Action Loop (jarvis_agent.py)
+
+**The modern agentic core.** Plain-English task → plan → act → observe → answer.
+Replaces fragmented heuristics with one clean ReAct loop using Ollama structured outputs.
+
+| Aspect | Detail |
+|---|---|
+| Planner model | `qwen2.5-coder:7b` (accurate). Falls back to `qwen2.5-coder:3b` on crash. |
+| Why structured outputs (`format` schema) not native `tools` | Native `tools` API **segfaults** llama-server on the RTX 3050. The `format` JSON-schema path is stable. |
+| Why catalog is relevance-filtered to 10 actions | Full 69-action prompt **segfaults** the 7b on 6GB VRAM. Small prompt = stable + accurate (fewer distractors). |
+| Action selection | Verb-weighted keyword scoring (restart/pull/build/deploy weighted highest), best-match listed first. |
+| Safety | Reuses `executor.ACTIONS` (whitelisted+tiered) + `autonomy.should_auto_execute()`. Read-only runs free; pre-approved/learned-safe auto-run; everything else PAUSES for Telegram approval. |
+| Entry points | `POST /agent` (api_v2.py) · `/do <task>` (Telegram) |
+| Function | `run_agent(task, max_steps=6, allow_destructive=False) -> {answer, steps, actions_run, needs_approval, elapsed}` |
+
+**CRITICAL rules for Claude when touching jarvis_agent.py:**
+1. NEVER switch to the native Ollama `tools` parameter — it crashes the GPU. Use `format` schema only.
+2. NEVER list all actions in the prompt — keep `_MAX_CATALOG` small (≤12) or the 7b segfaults.
+3. The autonomy gate is the safety boundary — never let the agent bypass `should_auto_execute()` for state-changing actions.
+
 ## Core Module Map
 
 | File | Purpose |
