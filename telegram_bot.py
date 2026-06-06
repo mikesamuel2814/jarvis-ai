@@ -1084,7 +1084,7 @@ def main():
             return
         await send(update, f"🤖 Queuing Claude Code task:\n`{task}`\n\nApproval required to run.")
         try:
-            resp = requests.post(f"{API_BASE}/action", json={"action": "claude_task", "arg": task}, timeout=10)
+            resp = requests.post(f"{API_BASE}/action", json={"action": "claude_task", "arg": task}, headers=_ah(), timeout=10)
             d = resp.json()
             req_id = d.get("request_id", "")
             if req_id:
@@ -1111,7 +1111,7 @@ def main():
         await update.message.chat.send_action("typing")
         try:
             resp = requests.post(f"{API_BASE}/claude-plan",
-                                 json={"query": query_text}, timeout=60)
+                                 json={"query": query_text}, headers=_ah(), timeout=60)
             d = resp.json()
             reply = d.get("response", "No response.")
             await send(update, reply)
@@ -1298,7 +1298,7 @@ def main():
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
-            r = requests.get(f"{API_BASE}/selfcheck", timeout=20)
+            r = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20)
             r.raise_for_status()
             d = r.json()
             overall = d.get("overall", "unknown")
@@ -1369,6 +1369,7 @@ def main():
                     resp = requests.post(
                         f"{API_BASE}/action",
                         json={"action": action, "arg": ""},
+                        headers=_ah(),
                         timeout=10,
                     )
                     d = resp.json()
