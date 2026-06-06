@@ -346,6 +346,20 @@ def _check_icon(key: str, val) -> str:
         return "⚠️"
 
 
+_CHECK_LABELS = {
+    "service_jarvis":          "🤖 Jarvis API",
+    "service_jarvis-telegram": "📱 Telegram Bot",
+    "service_ollama":          "🧠 Ollama",
+    "ollama_api":              "🔌 Ollama API",
+    "model_deepseek-r1":       "🤖 DeepSeek-R1",
+    "model_mxbai":             "📐 Embed Model",
+    "model_phi4-mini":         "⚡ Phi4-Mini",
+    "chromadb":                "🗄️ ChromaDB",
+    "memory_chunks":           "💾 Memory",
+    "disk_pct":                "💽 Disk",
+}
+
+
 def get_stats() -> str:
     """Jarvis brain stats card (HTML)."""
     try:
@@ -369,6 +383,18 @@ def get_stats() -> str:
         if top:
             src_parts = "  ".join(f"{code(k)} {v:,}" for k, v in top)
             lines.append(f"\n{bold('Memory Sources')}\n  {src_parts}")
+        try:
+            lr = requests.get(f"{API_BASE}/learning-stats", headers=_ah(), timeout=5)
+            lr.raise_for_status()
+            ld = lr.json()
+            lines.append(
+                f"\n📚 {bold('Learning')}\n"
+                f"  Interactions  {code(str(ld.get('total_interactions', 0)))}\n"
+                f"  Lessons       {code(str(ld.get('total_lessons', 0)))}\n"
+                f"  Golden        {code(str(ld.get('golden_examples', 0)))}"
+            )
+        except Exception:
+            pass
         return "\n".join(lines)
     except requests.exceptions.ConnectionError:
         return "⚠️ Sorry Sir, Jarvis API is not reachable right now."
@@ -390,10 +416,19 @@ def get_health() -> str:
         chroma = d.get("chromadb", d.get("memory", "?"))
         chunks = d.get("memory_chunks", "")
         mem_str = f"  {code(f'{chunks:,} chunks')}" if chunks else ""
+        uptime_str = ""
+        try:
+            si = requests.get(f"{API_BASE}/sysinfo", headers=_ah(), timeout=5).json()
+            uh = si.get("uptime_hours")
+            if uh is not None:
+                uptime_str = f"\n⏱ Uptime: {code(f'{uh}h')}"
+        except Exception:
+            pass
         return (
             f"{icon} {bold('Jarvis')} — {code(d.get('status', 'unknown'))}\n\n"
             f"{'✅' if ollama=='ok' else '❌'} Ollama: {code(ollama)}\n"
             f"{'✅' if chroma=='ok' else '❌'} ChromaDB: {code(chroma)}{mem_str}"
+            f"{uptime_str}"
         )
     except requests.exceptions.ConnectionError:
         return "❌ Sorry Sir, Jarvis API is not reachable right now."

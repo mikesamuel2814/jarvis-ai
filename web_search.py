@@ -57,25 +57,108 @@ def is_weather_query(text: str) -> bool:
     return bool(_WEATHER_TRIGGERS.search(text))
 
 
+_WEATHER_EMOJI_MAP = [
+    (re.compile(r"\bthunder|storm\b", re.IGNORECASE), "⛈"),
+    (re.compile(r"\bsnow|blizzard|sleet\b", re.IGNORECASE), "❄️"),
+    (re.compile(r"\bheavy rain|downpour|shower\b", re.IGNORECASE), "🌧"),
+    (re.compile(r"\brain|drizzle\b", re.IGNORECASE), "🌦"),
+    (re.compile(r"\bhaze|fog|mist|smog\b", re.IGNORECASE), "🌫"),
+    (re.compile(r"\bpartly cloudy|partly sunny\b", re.IGNORECASE), "⛅"),
+    (re.compile(r"\bcloudy|overcast\b", re.IGNORECASE), "🌥"),
+    (re.compile(r"\bsunny|clear\b", re.IGNORECASE), "☀️"),
+]
+
+_AUTO_PREFIXES = re.compile(
+    r"^(?:Auto|Unknown Location|Unknown)\s*:\s*", re.IGNORECASE
+)
+
+
+def _weather_emoji(condition: str) -> str:
+    """Return the best matching weather emoji for a condition string."""
+    for pattern, emoji in _WEATHER_EMOJI_MAP:
+        if pattern.search(condition):
+            return emoji
+    return "🌤"
+
+
 def get_weather(query: str) -> str:
-    """Fetch weather from wttr.in — no JS, instant, no API key needed."""
+    """Fetch weather from wttr.in — no JS, instant, no API key needed.
+
+    Returns a pre-formatted HTML-ready string like:
+        ⛅ <b>Dhaka</b> · Partly Cloudy · +30°C
+        💧 Humidity: 72% · 💨 Wind: ↑15km/h
+
+    Returns "" on failure.
+    """
     # Extract city name from query
     city = "auto"
+    city_display = ""          # human-readable city name (empty = auto-detect)
     m = _WEATHER_CITY.search(query)
     if m:
-        city = m.group(1).strip().replace(" ", "+")
+        city_display = m.group(1).strip()
+        city = city_display.replace(" ", "+")
     elif "dhaka" in query.lower():
         city = "Dhaka"
+        city_display = "Dhaka"
     elif "chittagong" in query.lower() or "chattogram" in query.lower():
         city = "Chittagong"
+        city_display = "Chittagong"
 
     try:
         import requests as _req
-        # Format: location + condition + temp + humidity + wind
+        # %l = location, %C = condition text, %t = temp, %h = humidity, %w = wind
         url = f"https://wttr.in/{city}?format=%l:+%C+%t,+humidity+%h,+wind+%w"
         r = _req.get(url, timeout=8)
-        if r.status_code == 200 and r.text.strip():
-            return r.text.strip()
+        if r.status_code != 200 or not r.text.strip():
+            return ""
+        raw = r.text.strip()
+
+        # Parse out location vs conditions
+        if ":" in raw:
+            loc_raw, rest = raw.split(":", 1)
+            loc_raw = loc_raw.strip()
+            rest = rest.strip()
+            # Strip double-spaces that wttr.in sometimes inserts
+            rest = re.sub(r"  +", " ", rest)
+        else:
+            loc_raw = ""
+            rest = re.sub(r"  +", " ", raw.strip())
+
+        # Decide displayed city name
+        if city_display:
+            display_loc = city_display
+        elif _AUTO_PREFIXES.match(raw) or loc_raw.lower() in ("auto", "unknown location", "unknown", ""):
+            display_loc = ""          # auto-detect — omit city
+        else:
+            display_loc = loc_raw
+
+        # Split "Partly Cloudy +14°C, humidity 90%, wind ↑4km/h"
+        # into condition · temp  and  humidity/wind
+        condition_temp = rest
+        humidity_wind = ""
+        comma_idx = rest.find(",")
+        if comma_idx != -1:
+            condition_temp = rest[:comma_idx].strip()
+            humidity_wind  = rest[comma_idx + 1:].strip()
+
+        # Pick emoji based on condition text
+        emoji = _weather_emoji(condition_temp)
+
+        # Build location part
+        if display_loc:
+            loc_part = f"<b>{display_loc}</b> · "
+        else:
+            loc_part = "📍 Your Location · "
+
+        line1 = f"{emoji} {loc_part}{condition_temp}"
+
+        # Format humidity / wind decoratively
+        if humidity_wind:
+            hw = humidity_wind.replace("humidity", "💧 Humidity:").replace("wind", "💨 Wind:")
+            line2 = hw.strip()
+            return f"{line1}\n{line2}"
+        return line1
+
     except Exception as exc:
         log.warning("wttr.in failed: %s", exc)
     return ""
@@ -253,7 +336,7 @@ def web_answer(
     if is_weather_query(query):
         weather = get_weather(query)
         if weather:
-            return f"Sir, {weather}", []
+            return f"Sir,\n{weather}", []
 
     data = research(query, num_results=num_results)
     sources = data["sources"]
