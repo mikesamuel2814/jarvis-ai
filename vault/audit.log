@@ -28,3 +28,14 @@
 2026-06-07 04:45:01,152 | [OK] action=SET key=TURN_CREDENTIAL tool=vault_cli session=local 
 2026-06-07 04:45:01,199 | [OK] action=SET key=RING_TIMEOUT_MS tool=vault_cli session=local 
 2026-06-07 04:45:01,245 | [OK] action=SET key=FIREBASE_SERVICE_ACCOUNT_JSON tool=vault_cli session=local 
+2026-06-07 04:45:01,293 | [OK] action=SET key=PUBLIC_SIGNALING_HOST tool=vault_cli session=local 
+2026-06-07 04:45:01,341 | [OK] action=SET key=TURN_URLS tool=vault_cli session=local 
+2026-06-07 04:45:01,388 | [OK] action=SET key=TURN_USERNAME tool=vault_cli session=local 
+2026-06-07 04:45:01,434 | [OK] action=SET key=TURN_CREDENTIAL tool=vault_cli session=local 
+2026-06-07 04:45:01,666 | [OK] action=SET key=test_key tool=test_tool session=local 
+2026-06-07 04:45:01,708 | [OK] action=GET key=test_key tool=test_tool session=local 
+2026-06-07 04:45:01,763 | [OK] action=SET key=api_key tool=vault_cli session=local 
+2026-06-07 04:45:01,805 | [OK] action=GET key=api_key tool=allowed_tool session=local 
+2026-06-07 04:45:01,808 | [FAIL] action=GET key=api_key tool=bad_tool session=local access_denied
+2026-06-07 04:45:01,854 | [OK] action=SET key=db_pass tool=vault_cli session=local 
+2026-06-07 04:45:01,897 | [OK] action=GET key=db_pass tool=unknown session=local 
