@@ -1,11 +1,15 @@
 """
 Jarvis Web Research Module
 
-search()   → DuckDuckGo results (no API key)
-scrape()   → clean text from URL via trafilatura
-research() → combined context string ready for AI
-is_web_query() → detect if a query needs real-time web data
-web_answer()   → full pipeline: search → scrape → AI → short reply
+Primary:  Headless Chrome via browser/agent.py (Google search + JS scraping)
+Fallback: DuckDuckGo API (ddgs) if browser fails
+
+Public API:
+  is_web_query(text)            → bool
+  search(query, num)            → list[{title, url, snippet}]
+  scrape(url)                   → clean text
+  research(query)               → {query, sources, context, elapsed}
+  web_answer(query, use_cloud)  → (answer_text, sources)
 """
 
 from __future__ import annotations
@@ -13,73 +17,76 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any
 
 log = logging.getLogger("jarvis.web")
 
 # ── Intent detection ──────────────────────────────────────────────────────
 
 _WEB_TRIGGERS = [
-    # Recency signals
     r"\b(latest|recent|current|today|now|live|real.?time|breaking|trending)\b",
-    # Action signals
     r"\b(search|look up|google|find|browse|check online|what.?s happening)\b",
-    # News / market
     r"\b(news|price of|stock|crypto|bitcoin|btc|eth|forex|weather|score|match)\b",
-    # Factual lookups that change
     r"\b(who (is|won|leads)|what (is|are) the (current|latest|new))\b",
     r"\b(release date|launched|announced|update|version \d|changelog)\b",
 ]
-
 _WEB_PATTERN = re.compile("|".join(_WEB_TRIGGERS), re.IGNORECASE)
 
 
 def is_web_query(text: str) -> bool:
-    """True if the query likely needs real-time web data."""
     return bool(_WEB_PATTERN.search(text))
 
 
-# ── Search ────────────────────────────────────────────────────────────────
+# ── Search — browser first, ddgs fallback ────────────────────────────────
 
 def search(query: str, num: int = 5) -> list[dict]:
-    """
-    DuckDuckGo search. Returns list of {title, url, snippet}.
-    Falls back to [] on any error.
-    """
+    """Google via headless Chrome. Falls back to DuckDuckGo API on error."""
+    try:
+        from browser.agent import google_search
+        results = google_search(query, num=num)
+        if results:
+            log.info("search('%s'): %d results via Chrome", query, len(results))
+            return results
+        log.warning("Chrome search returned 0 results, falling back to ddgs")
+    except Exception as exc:
+        log.warning("Chrome search failed (%s), falling back to ddgs", exc)
+
+    # Fallback: ddgs
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=num))
+            raw = list(ddgs.text(query, max_results=num))
         return [
             {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
-            for r in results
+            for r in raw
         ]
-    except Exception as exc:
-        log.warning("DuckDuckGo search failed: %s", exc)
+    except Exception as exc2:
+        log.error("ddgs fallback also failed: %s", exc2)
         return []
 
 
-# ── Scrape ────────────────────────────────────────────────────────────────
+# ── Scrape — browser for JS-heavy pages, trafilatura for static ───────────
 
-def scrape(url: str, max_chars: int = 3000) -> str:
+def scrape(url: str, max_chars: int = 3500) -> str:
     """
-    Extract clean text from a URL using trafilatura.
-    Returns empty string on failure (never raises).
+    Fetch full page content.
+    Uses headless Chrome so JS-rendered content (SPAs, paywalled previews) is captured.
     """
+    try:
+        from browser.agent import open_url
+        text = open_url(url)
+        if text and len(text) > 100:
+            return text[:max_chars]
+    except Exception as exc:
+        log.debug("Browser scrape failed for %s: %s", url, exc)
+
+    # Fallback: trafilatura (static HTML, no JS)
     try:
         import trafilatura
         downloaded = trafilatura.fetch_url(url)
-        if not downloaded:
-            return ""
-        text = trafilatura.extract(
-            downloaded,
-            include_comments=False,
-            include_tables=True,
-            no_fallback=False,
-        )
+        text = trafilatura.extract(downloaded or "", include_tables=True, no_fallback=False)
         return (text or "")[:max_chars]
-    except Exception as exc:
-        log.debug("Scrape failed for %s: %s", url, exc)
+    except Exception as exc2:
+        log.debug("trafilatura fallback failed for %s: %s", url, exc2)
         return ""
 
 
@@ -87,17 +94,8 @@ def scrape(url: str, max_chars: int = 3000) -> str:
 
 def research(query: str, num_results: int = 3, scrape_top: int = 2) -> dict:
     """
-    Full research pipeline:
-      1. DuckDuckGo search
-      2. Scrape top N pages for full content
-      3. Return structured context dict
-
-    Returns:
-      {
-        "query": str,
-        "sources": [{title, url, snippet, full_text}],
-        "context": str,   # ready to inject into AI prompt
-      }
+    Full pipeline: search → scrape top pages → build AI context block.
+    Returns {query, sources, context, elapsed}.
     """
     t0 = time.time()
     results = search(query, num=num_results)
@@ -105,28 +103,24 @@ def research(query: str, num_results: int = 3, scrape_top: int = 2) -> dict:
 
     for i, r in enumerate(results):
         full_text = ""
-        if i < scrape_top and r["url"]:
+        if i < scrape_top and r.get("url"):
             full_text = scrape(r["url"])
         sources.append({
-            "title":     r["title"],
-            "url":       r["url"],
-            "snippet":   r["snippet"],
+            "title":     r.get("title", ""),
+            "url":       r.get("url", ""),
+            "snippet":   r.get("snippet", ""),
             "full_text": full_text,
         })
 
-    # Build context block
     ctx_parts = [f"Web search results for: {query}\n"]
     for i, s in enumerate(sources, 1):
         ctx_parts.append(f"[{i}] {s['title']}")
         ctx_parts.append(f"URL: {s['url']}")
-        if s["full_text"]:
-            ctx_parts.append(s["full_text"][:1500])
-        else:
-            ctx_parts.append(s["snippet"])
+        ctx_parts.append(s["full_text"][:1500] if s["full_text"] else s["snippet"])
         ctx_parts.append("")
 
     elapsed = round(time.time() - t0, 1)
-    log.info("research('%s'): %d results in %.1fs", query, len(sources), elapsed)
+    log.info("research('%s'): %d sources in %.1fs", query, len(sources), elapsed)
 
     return {
         "query":   query,
@@ -144,10 +138,8 @@ def web_answer(
     num_results: int = 3,
 ) -> tuple[str, list[dict]]:
     """
-    search → scrape → AI → short reply
-
-    Returns (answer_text, sources_list).
-    Caller formats the Telegram message.
+    search → scrape → AI → short Telegram-ready reply.
+    Returns (answer_text, sources).
     """
     data = research(query, num_results=num_results)
     sources = data["sources"]
@@ -155,42 +147,38 @@ def web_answer(
     if not sources:
         return "Couldn't find anything online for that, Sir.", []
 
-    web_ctx = data["context"]
-
     system = (
         "You are Jarvis, Mike's personal AI assistant.\n"
-        "Using the web search results below, answer the question.\n"
+        "Using ONLY the web search results below, answer the question.\n"
         "Rules:\n"
-        "- Address Mike as 'Sir' once at the start\n"
-        "- Be concise: 3-5 bullet points max\n"
-        "- Lead with the most important fact\n"
-        "- End with the most relevant source URL if useful\n"
-        "- Never say 'based on the results' or 'according to'\n"
-        "- No fluff, no padding\n\n"
-        f"Web Context:\n{web_ctx[:4000]}"
+        "- Open with 'Sir,' exactly once\n"
+        "- 3-5 bullet points max, each under 15 words\n"
+        "- Lead with the single most important fact\n"
+        "- Include one source URL at the end if it adds value\n"
+        "- Never say 'based on results' or 'according to'\n"
+        "- No fluff\n\n"
+        f"Web Context:\n{data['context'][:4500]}"
     )
 
     try:
         if use_cloud:
             import claude_client
-            client = claude_client.get_client()
-            answer, _ = client.query(system=system, user=query)
+            answer, _ = claude_client.get_client().query(system=system, user=query)
         else:
-            # Edge: inject context into Ollama query
+            import re as _re
             import ollama as _ollama
             resp = _ollama.Client(host="http://localhost:11434").chat(
                 model="deepseek-r1:7b",
                 messages=[{"role": "user", "content": f"{system}\n\nQuestion: {query}"}],
                 options={"num_ctx": 4096, "num_predict": 512, "temperature": 0.3},
             )
-            answer = resp["message"]["content"]
-            answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+            answer = _re.sub(r"<think>.*?</think>", "", resp["message"]["content"], flags=_re.DOTALL).strip()
     except Exception as exc:
         log.error("web_answer AI call failed: %s", exc)
-        # Fallback: return snippets directly
-        lines = ["Here's what I found, Sir:\n"]
+        lines = ["Here's what I found online, Sir:\n"]
         for s in sources[:3]:
-            lines.append(f"• {s['snippet'][:200]}")
+            if s["snippet"]:
+                lines.append(f"• {s['snippet'][:200]}")
         answer = "\n".join(lines)
 
     return answer, sources

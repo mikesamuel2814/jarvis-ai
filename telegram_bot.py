@@ -1082,13 +1082,45 @@ def main():
         try:
             from web_search import web_answer
             answer, sources = web_answer(query_text, use_cloud=True)
-            # Append source links if not already in answer
             if sources and "http" not in answer:
                 links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
                 answer = answer + "\n\n" + links
             await thinking_msg.edit_text(_to_legacy_markdown(answer), parse_mode="Markdown")
         except Exception as e:
             await thinking_msg.edit_text(f"Web search error: {e}")
+
+    async def browse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Open a URL in headless Chrome, summarise + optional screenshot."""
+        args = context.args or []
+        url = args[0] if args else ""
+        want_shot = "--screenshot" in args or "-s" in args
+        if not url or not url.startswith("http"):
+            await send(update, "Usage: /browse <url> [--screenshot]\nExample: /browse https://github.com --screenshot")
+            return
+        thinking_msg = await update.message.reply_text(f"🌐 Opening {url} ...")
+        try:
+            from browser.agent import BrowserAgent
+            agent = BrowserAgent.get()
+            page_text = agent.open_url(url)
+            title = agent.get_title()
+
+            import claude_client
+            system = (
+                "You are Jarvis. Summarise this web page for Mike.\n"
+                "Rules: open with 'Sir,', max 5 bullet points, highlight key facts/numbers, "
+                "note any important links or actions available on the page. No fluff."
+            )
+            summary, _ = claude_client.get_client().query(
+                system=system,
+                user=f"Page title: {title}\n\nContent:\n{page_text[:4000]}",
+            )
+            await thinking_msg.edit_text(_to_legacy_markdown(summary), parse_mode="Markdown")
+
+            if want_shot:
+                png = agent.screenshot()
+                await update.message.reply_photo(photo=png, caption=f"📸 {title[:80]}")
+        except Exception as e:
+            await thinking_msg.edit_text(f"Browse error: {e}")
 
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
@@ -1251,6 +1283,7 @@ def main():
     app_bot.add_handler(CommandHandler("exec", exec_cmd))
     app_bot.add_handler(CommandHandler("web", web_cmd))
     app_bot.add_handler(CommandHandler("search", web_cmd))
+    app_bot.add_handler(CommandHandler("browse", browse_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

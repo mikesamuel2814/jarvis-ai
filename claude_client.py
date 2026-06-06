@@ -17,6 +17,9 @@ import subprocess
 import time
 from pathlib import Path
 
+# Prevent segfault when Claude CLI subprocess runs alongside Chrome/Selenium
+_SAFE_ENV = {**os.environ, "MALLOC_ARENA_MAX": "2"}
+
 import yaml
 
 log = logging.getLogger("jarvis.claude_client")
@@ -122,6 +125,7 @@ class ClaudeClient:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=_SAFE_ENV,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"Claude CLI timed out after {timeout}s")
