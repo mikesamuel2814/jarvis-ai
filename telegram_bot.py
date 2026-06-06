@@ -307,8 +307,8 @@ def get_stats() -> str:
         resp = requests.get(f"{API_BASE}/stats", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        chunks = d.get("memory_chunks", 0)
-        model = d.get("primary_model", "N/A")
+        chunks = d.get("total_chunks", d.get("memory_chunks", 0))
+        model = d.get("primary_model", d.get("model", "deepseek-r1:7b"))
         breakdown = d.get("source_type_breakdown", {})
         top = sorted(breakdown.items(), key=lambda x: -x[1])
         src_lines = "  ".join(f"`{k}:{v}`" for k, v in top)
@@ -327,12 +327,11 @@ def get_health() -> str:
         resp = requests.get(f"{API_BASE}/health", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        ok = d.get("status") == "healthy"
+        ok = d.get("status") in ("healthy", "ok")
         icon = "✅" if ok else "⚠️"
         return (
             f"{icon} *Jarvis* — {d.get('status', 'unknown')}\n"
-            f"Ollama: `{d.get('ollama')}` | Memory: `{d.get('memory_chunks', 0):,}` chunks\n"
-            f"Model: `{d.get('model')}`"
+            f"Ollama: `{d.get('ollama')}` | ChromaDB: `{d.get('chromadb', d.get('memory', '?'))}`"
         )
     except Exception as e:
         return f"Health check failed: {e}"
@@ -356,8 +355,8 @@ def get_sysinfo() -> str:
         svc_ok = hl.get("status") == "healthy"
         svc_icon = "✅" if svc_ok else "⚠️"
 
-        chunks = st.get("memory_chunks", 0)
-        model = st.get("primary_model", "N/A")
+        chunks = st.get("total_chunks", st.get("memory_chunks", 0))
+        model = st.get("primary_model", st.get("model", "deepseek-r1:7b"))
         breakdown = st.get("source_type_breakdown", {})
         top2 = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
         src = "  ".join(f"`{k}:{v}`" for k, v in top2)

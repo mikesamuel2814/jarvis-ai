@@ -349,7 +349,7 @@ def query_hybrid(query: str, rag_context: str, history: list[dict] | None = None
 
     cfg = _load_config()
     ollama_cfg = cfg.get("ollama", {})
-    opts = {"temperature": 0.2, "num_predict": 512, "num_ctx": 4096}
+    opts = {"temperature": 0.2, "num_predict": 512, "num_ctx": 2048}  # 6GB VRAM cap — never raise
 
     pre_prompt = f"""Analyze this query briefly. Extract:
 1. Key concepts (list)
