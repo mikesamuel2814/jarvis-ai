@@ -1263,7 +1263,7 @@ def main():
                 system=system,
                 user=f"Page title: {title}\n\nContent:\n{page_text[:4000]}",
             )
-            await thinking_msg.edit_text(_to_legacy_markdown(summary), parse_mode="Markdown")
+            await thinking_msg.edit_text(_to_html(summary), parse_mode="HTML")
 
             if want_shot and png:
                 await update.message.reply_photo(photo=png, caption=f"📸 {title[:80]}")
@@ -1440,9 +1440,9 @@ def main():
             _trigger_training_if_due()
             for i, part in enumerate(split_message(answer)):
                 if i == 0:
-                    await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                    await thinking_msg.edit_text(_to_html(part), parse_mode="HTML")
                 else:
-                    await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                    await update.message.reply_text(_to_html(part), parse_mode="HTML")
         except Exception as e:
             log.error(f"Photo analysis error: {e}")
             await thinking_msg.edit_text(f"Image analysis failed: {e}")
