@@ -446,6 +446,17 @@ def execute(
     """
     Route and execute a query. Returns {"response": str, "tier": str, "model": str}.
     """
+    # Inject learned rules at the start
+    try:
+        from brain_injector import get_injection
+        skill_injection = get_injection(query, history=history)
+        if skill_injection and rag_context:
+            rag_context = skill_injection + "\n\n" + rag_context
+        elif skill_injection:
+            rag_context = skill_injection
+    except Exception as e:
+        log.debug(f"Skill injection failed: {e}")
+
     if force_tier:
         tier = BrainTier(force_tier.lower())
     else:

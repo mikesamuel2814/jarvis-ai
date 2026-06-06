@@ -383,10 +383,20 @@ def retrieve_context(query, n=5):
         return []
 
 
-def build_system_prompt(ctx_block: str = "") -> str:
+def build_system_prompt(ctx_block: str = "", query: str = "") -> str:
     """Build the full system prompt. ctx_block is pre-formatted RAG context."""
     profile_block = profile_prompt_block()
     facts_block = facts_prompt_block()
+
+    # Inject learned rules (fast, cached)
+    skill_injection = ""
+    try:
+        from brain_injector import get_injection
+        skill_injection = get_injection(query)
+        if skill_injection:
+            skill_injection = "\n\n" + skill_injection
+    except ImportError:
+        pass
 
     # Label RAG context clearly
     rag_section = ""
@@ -420,7 +430,9 @@ def build_system_prompt(ctx_block: str = "") -> str:
         f"IMPORTANT: If you do not recognise a specific tool, product, or framework name in the user's query, "
         f"respond with exactly: 'I don't recognise [name]. Did you mean something else?' — "
         f"never invent information about it.\n"
-        # 7. RAG context last (grounding, not identity)
+        # 7. Learned rules injection
+        f"{skill_injection}"
+        # 8. RAG context last (grounding, not identity)
         f"{rag_section}"
     )
 
@@ -442,7 +454,7 @@ def build_messages(query, context_chunks, history=None, unknown_term: str | None
             parts.append(f"{project_hint}[{source}] {text}")
         ctx_block = "\n\n".join(parts)
 
-    system = build_system_prompt(ctx_block)
+    system = build_system_prompt(ctx_block, query=query)
 
     # Inject unknown-term warning directly into system prompt so the model
     # sees it as a hard instruction rather than just part of the user turn.

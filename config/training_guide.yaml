@@ -1,0 +1,18 @@
+bad_interaction_count: 7
+focus_areas:
+- jarvis
+generated_at: '2026-06-06T20:54:59.307480'
+guide: 'Local analysis of 7 bad interactions and 0 skill gaps.
+
+
+  1. Focus areas: jarvis
+
+  2. Reinforce: concise answers, Jarvis identity, project context
+
+  3. Avoid: repetition, ''I''m Phi'', ''I''m Microsoft'', empty responses
+
+  4. Add to memory: recent project updates, user corrections
+
+  5. Test questions: ''Who are you?'', ''What is AsthaCash?'', ''List active services'''
+model_used: local_analysis
+skill_gap_count: 0
