@@ -1057,7 +1057,8 @@ def main():
                     lines = [f"{icon} {bold('Jarvis Self-Check')} — {bold(esc(overall.upper()))}\n"]
                     checks = d.get("checks", {})
                     for k, v in checks.items():
-                        lines.append(f"  {_check_icon(k, v)} {code(k)}: {code(str(v))}")
+                        label = _CHECK_LABELS.get(k, k)
+                        lines.append(f"  {_check_icon(k, v)} {label}: {code(str(v))}")
                     if not checks:
                         lines.append("  <i>No check data returned.</i>")
                     issues = d.get("issues", [])
@@ -1335,18 +1336,25 @@ def main():
                     snippet = (s.get("snippet") or s.get("full_text") or "").strip()
                     date    = s.get("date", "")[:10] if s.get("date") else ""
                     source  = s.get("source", "")
-                    meta    = " · ".join(filter(None, [date, source]))
+                    meta    = " · ".join(filter(None, [
+                        (f"📅 {date}" if date else ""),
+                        (f"🌐 {source}" if source else ""),
+                    ]))
+
+                    # Truncate title at word boundary (≤100 chars)
+                    if len(title) > 100:
+                        title = title[:100].rsplit(" ", 1)[0] + "…"
 
                     if url:
-                        header = bold(link(esc(title[:80]), url))
+                        header = bold(link(esc(title), url))
                     else:
-                        header = bold(esc(title[:80]))
+                        header = bold(esc(title))
 
-                    card_lines = [f"\n{i}. {header}"]
+                    card_lines = [f"\n{header}"]
                     if meta:
-                        card_lines.append(f"   {italic(esc(meta))}")
+                        card_lines.append(esc(meta))
                     if snippet:
-                        card_lines.append(f"   {esc(snippet[:180])}")
+                        card_lines.append(esc(snippet[:150]))
                     cards_html += "\n".join(card_lines)
 
                 await update.message.reply_text(cards_html.strip(), parse_mode="HTML",
@@ -1379,20 +1387,11 @@ def main():
         city = " ".join(context.args).strip() if context.args else ""
         query = f"weather in {city}" if city else "weather today"
         from web_search import get_weather
-        from fmt import bold, code, esc, italic
+        from fmt import code
+        # get_weather() returns a pre-formatted HTML-ready string
         result = get_weather(query)
         if result:
-            # result is plain text like "Dhaka: Hazy 30°C, humidity 72%, wind 8km/h"
-            # Split into location and conditions for nicer display
-            if ":" in result:
-                location, conditions = result.split(":", 1)
-                formatted = (
-                    f"🌤 {bold(esc(location.strip()))}\n"
-                    f"{esc(conditions.strip())}"
-                )
-            else:
-                formatted = f"🌤 {esc(result)}"
-            await send(update, formatted, already_html=True)
+            await send(update, f"Sir,\n{result}", already_html=True)
         else:
             await send(update,
                 f"⚠️ Could not fetch weather, Sir. Try {code('/web weather in &lt;city&gt;')}",
@@ -1591,7 +1590,8 @@ def main():
             checks = d.get("checks", {})
             if checks:
                 for k, v in checks.items():
-                    lines.append(f"  {_check_icon(k, v)} {code(k)}: {code(str(v))}")
+                    label = _CHECK_LABELS.get(k, k)
+                    lines.append(f"  {_check_icon(k, v)} {label}: {code(str(v))}")
             else:
                 lines.append("  <i>No check data returned.</i>")
             issues = d.get("issues", [])
@@ -1699,13 +1699,19 @@ def main():
                         snip    = (s.get("snippet") or s.get("full_text") or "").strip()
                         date    = s.get("date", "")[:10]
                         src     = s.get("source", "")
-                        meta    = " · ".join(filter(None, [date, src]))
-                        header  = bold(link(esc(title_s[:80]), url)) if url else bold(esc(title_s[:80]))
-                        card_lines = [f"\n{i}. {header}"]
+                        meta    = " · ".join(filter(None, [
+                            (f"📅 {date}" if date else ""),
+                            (f"🌐 {src}" if src else ""),
+                        ]))
+                        # Truncate title at word boundary (≤100 chars)
+                        if len(title_s) > 100:
+                            title_s = title_s[:100].rsplit(" ", 1)[0] + "…"
+                        header  = bold(link(esc(title_s), url)) if url else bold(esc(title_s))
+                        card_lines = [f"\n{header}"]
                         if meta:
-                            card_lines.append(f"   {italic(esc(meta))}")
+                            card_lines.append(esc(meta))
                         if snip:
-                            card_lines.append(f"   {esc(snip[:180])}")
+                            card_lines.append(esc(snip[:150]))
                         cards += "\n".join(card_lines)
                     await update.message.reply_text(cards.strip(), parse_mode="HTML",
                         disable_web_page_preview=True)
