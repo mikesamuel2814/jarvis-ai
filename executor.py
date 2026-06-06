@@ -278,9 +278,14 @@ def extract_action_arg(text: str, action: str) -> str:
     return ""
 
 
-def run_action(action_name: str, arg: str = "") -> dict:
-    """Execute an action. Returns {success, output, action, tier}."""
-    _audit(f"EXECUTE {action_name} arg={arg!r}")
+def run_action(action_name: str, arg: str = "", approved: bool = False) -> dict:
+    """Execute an action. Returns {success, output, action, tier}.
+
+    approved=True means a human already authorized this step (e.g. via a
+    task-level Telegram approval), so per-step escalation guards are bypassed —
+    the step executes directly instead of creating another pending request.
+    """
+    _audit(f"EXECUTE {action_name} arg={arg!r} approved={approved}")
     if action_name not in ACTIONS:
         return {"success": False, "output": f"Unknown action: {action_name}", "action": action_name}
 
@@ -307,7 +312,7 @@ def run_action(action_name: str, arg: str = "") -> dict:
         if action_name == "project_status":
             return _project_status()
         if action_name.startswith("kali_"):
-            return _run_kali(action_name, arg)
+            return _run_kali(action_name, arg, approved=approved)
         if entry["cmd"]:
             cmd = entry["cmd"]
             if "{arg}" in cmd:
@@ -501,7 +506,7 @@ def _run_claude_task(task: str) -> dict:
             "action": "claude_task"}
 
 
-def _run_kali(action_name: str, arg: str = "") -> dict:
+def _run_kali(action_name: str, arg: str = "", approved: bool = False) -> dict:
     """Execute a Kali pentest tool via kali_tools.run_tool (scope-checked).
 
     arg format: 'target [opts...]' — first token is the target, the rest are
@@ -539,7 +544,8 @@ def _run_kali(action_name: str, arg: str = "") -> dict:
 
     # Escalation guard: if effective tier is APPROVE but this came through the
     # auto-gated path (static tier auto/confirm), require explicit approval.
-    if eff_tier == APPROVE and static_tier != APPROVE:
+    # Skipped when approved=True — a task-level approval already authorized this.
+    if eff_tier == APPROVE and static_tier != APPROVE and not approved:
         try:
             from permissions import create_request
             banner = ""

@@ -70,6 +70,35 @@ def create_request(action: str, description: str, tier: str, arg: str = "", uid:
     return req
 
 
+def create_task_request(description: str, steps: list[dict], summary: str = "", uid: int = 0) -> dict:
+    """Create ONE pending approval for a whole multi-step task.
+
+    steps: [{"action","arg","desc"}, ...] executed in order on a single approval.
+    This is the task-level gate — Sir approves the flow once, then Jarvis runs
+    every step autonomously (only catastrophic ops re-prompt at execution time).
+    """
+    req_id = str(uuid.uuid4())[:8].upper()
+    req = {
+        "id": req_id,
+        "kind": "task",
+        "action": "task_flow",
+        "description": description,
+        "summary": summary,
+        "steps": steps,
+        "tier": APPROVE,
+        "arg": "",
+        "uid": uid,
+        "created_at": datetime.now().isoformat(),
+        "expires_at": (datetime.now() + timedelta(minutes=TIMEOUT_MINUTES)).isoformat(),
+        "response": None,
+    }
+    pending = _load_pending()
+    pending[req_id] = req
+    _save_pending(pending)
+    _audit(req_id, f"task created: {len(steps)} step(s) — {description}")
+    return req
+
+
 def respond(req_id: str, response: str) -> dict | None:
     """Record a response (approve/deny) for a pending request."""
     pending = _load_pending()
