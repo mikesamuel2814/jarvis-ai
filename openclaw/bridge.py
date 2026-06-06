@@ -16,6 +16,9 @@ Public action API (built on ``openclaw.actions``):
         circular dependency).
   * ``dispatch(natural_language) -> dict``
         Let OpenClaw plan + execute a real action from natural language.
+  * ``tool_invoke(tool, args=None, ...) -> dict``
+        Invoke one named OpenClaw tool directly via the HTTP tool surface
+        (``POST /tools/invoke``). Same ``{ok, output, via, fallback}`` shape.
 
 Plus the original memory/sync + alert helpers:
   * push_memory_to_openclaw / pull_skills_from_openclaw
@@ -54,14 +57,25 @@ OC_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789"
 # the caller falls back to executor.run_action. Keep this conservative: only
 # list actions OpenClaw can genuinely do better/equally and safely.
 #
-# kind="rpc"  -> openclaw gateway call <method>
-# kind="nl"   -> phrase a natural-language agent turn
+# kind="tool" -> POST /tools/invoke (HTTP, preferred — fast, no node subprocess)
+#                spec: {"tool": <name>, "action"?: <str>, "args"?: {...}}
+#                Note: OpenClaw HTTP-denies RCE/control-plane tools (exec, shell,
+#                gateway, nodes, cron, fs_write …) so they are NOT mappable here
+#                by design — those always fall back to executor.py.
+# kind="rpc"  -> openclaw gateway call <method>  (CLI/WebSocket, read-scope)
+# kind="nl"   -> phrase a natural-language agent turn (CLI)
 
 _OC_ACTION_MAP: dict[str, dict] = {
     # Native gateway introspection — OpenClaw owns its own health/status.
+    # These go over the CLI WebSocket RPC (the gateway control plane is not
+    # reachable through HTTP /tools/invoke on purpose).
     "openclaw_health": {"kind": "rpc", "method": "health"},
     "openclaw_status": {"kind": "rpc", "method": "status"},
     "openclaw_presence": {"kind": "rpc", "method": "system-presence"},
+
+    # Session / memory introspection via the HTTP tool surface (no node needed).
+    "openclaw_sessions": {"kind": "tool", "tool": "sessions_list",
+                          "action": "json"},
 }
 
 
@@ -221,6 +235,20 @@ def run_action(action: str, args: dict | None = None) -> dict:
                 "reason": "OpenClaw gateway unavailable", "fallback": True}
 
     try:
+        if spec["kind"] == "tool":
+            res = actions.tools_invoke(
+                spec["tool"],
+                args=args.get("args") or spec.get("args"),
+                action=spec.get("action"),
+                session_key=args.get("session_key"),
+            )
+            if res.get("ok"):
+                return {"ok": True, "via": "openclaw", "action": action,
+                        "output": res.get("text", "")}
+            return {"ok": False, "via": "openclaw", "action": action,
+                    "reason": res.get("error", "tool invoke failed"),
+                    "fallback": True}
+
         if spec["kind"] == "rpc":
             res = actions.gateway_call(spec["method"], params=args.get("params"))
             if res.get("ok"):
@@ -291,6 +319,49 @@ def dispatch(natural_language: str) -> dict:
         return {"ok": True, "via": "openclaw", "output": output}
     return {"ok": False, "via": "openclaw",
             "reason": res.get("error", "dispatch failed"), "fallback": True}
+
+
+def tool_invoke(tool: str, args: dict | None = None,
+                action: str | None = None,
+                session_key: str | None = None) -> dict:
+    """
+    Invoke a single named OpenClaw tool directly over the HTTP tool surface.
+
+    This is the low-friction "do one thing" entrypoint for callers that already
+    know which OpenClaw tool they want (e.g. ``sessions_list``,
+    ``memory_search``). It never reaches the gateway control plane or any RCE
+    tool — OpenClaw hard-denies those over HTTP (returned here as
+    ``ok=False`` with ``fallback=True``).
+
+    Returns:
+        {"ok": True,  "output": <str>, "via": "openclaw", "tool": <tool>}
+        {"ok": False, "reason": <str>, "via": "openclaw", "tool": <tool>,
+         "fallback": True}
+
+    Never raises.
+    """
+    if not tool:
+        return {"ok": False, "via": "openclaw", "tool": tool,
+                "reason": "tool name required", "fallback": False}
+
+    if not openclaw_available():
+        return {"ok": False, "via": "openclaw", "tool": tool,
+                "reason": "OpenClaw gateway unavailable", "fallback": True}
+
+    try:
+        res = actions.tools_invoke(tool, args=args, action=action,
+                                   session_key=session_key)
+    except Exception as e:  # noqa: BLE001
+        log.error("tool_invoke(%s) crashed: %s", tool, e)
+        return {"ok": False, "via": "openclaw", "tool": tool,
+                "reason": f"bridge error: {e}", "fallback": True}
+
+    if res.get("ok"):
+        return {"ok": True, "via": "openclaw", "tool": tool,
+                "output": res.get("text", "")}
+    return {"ok": False, "via": "openclaw", "tool": tool,
+            "reason": res.get("error", "tool invoke failed"),
+            "fallback": True}
 
 
 # ── Sync logging ──────────────────────────────────────────────────

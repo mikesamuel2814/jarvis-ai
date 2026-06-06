@@ -5,30 +5,54 @@ This module knows *how* to talk to the locally-running OpenClaw gateway and
 nothing about Jarvis' higher-level dispatch policy. ``bridge.py`` builds the
 public, caller-friendly API on top of these primitives.
 
-Discovered OpenClaw interface (OpenClaw 2026.6.1, service `openclaw.service`):
+Discovered OpenClaw interface (OpenClaw 2026.6.1, service ``openclaw.service``)
+================================================================================
 
-  * HTTP control surface — gateway binds loopback on 127.0.0.1:18789.
-      - ``GET /health``  -> ``{"ok": true, "status": "live"}``  (no auth).
-        This is the cheapest liveness probe and what ``gateway_alive`` uses.
-      - The rest of the surface is a WebSocket RPC gateway, not REST, so we do
-        NOT hand-roll a WS client here — we shell out to the official CLI which
-        speaks it correctly.
+The gateway is a WebSocket + HTTP multiplex server bound to loopback on
+``127.0.0.1:18789`` (``gateway.mode=local``, ``gateway.bind=loopback`` in
+``~/.openclaw/openclaw.json``). Two surfaces matter to Jarvis:
 
-  * CLI / RPC — the ``openclaw`` node binary connects to the running gateway:
-      - ``openclaw gateway call <method> --json --params <json>``
-            structured RPC. methods: health, status, system-presence, cron.* …
-      - ``openclaw agent --message <text> --json``
-            run one agent turn (natural-language plan + execute) via the
-            gateway and return the result as JSON.
-      - ``openclaw message send --target <t> --message <m>``
-            deliver a chat message through a configured channel.
+1. HTTP — preferred, used here as the primary path:
 
-Safety rules enforced here:
+     * ``GET /health``  -> ``{"ok": true, "status": "live"}``  (no auth).
+       Cheapest liveness probe; used by :func:`gateway_alive`.
+
+     * ``POST /tools/invoke``  (Bearer auth, always enabled). Invoke a single
+       tool directly with Gateway auth + tool policy. Request:
+           ``{"tool": <name>, "action"?: <str>, "args"?: {...},
+              "sessionKey"?: <str>}``
+       Response:
+           ``200 {"ok": true,  "result": {...}}``
+           ``4xx/5xx {"ok": false, "error": {"type", "message"}}``
+       The gateway hard-denies RCE/control-plane tools over HTTP by default
+       (``exec``, ``spawn``, ``shell``, ``fs_write``, ``fs_delete``, ``cron``,
+       ``gateway``, ``nodes`` …) — those return ``404 not_found``. This is a
+       safety feature we rely on: Jarvis never gets raw shell via OpenClaw HTTP.
+
+2. CLI — fallback for things the HTTP tool surface deliberately cannot do
+   (notably ``message send`` reply-delivery and full ``agent`` turns). The
+   ``openclaw`` node binary connects to the running gateway:
+       * ``openclaw agent --agent <id> --session-key <k> --message <t> --json``
+       * ``openclaw message send --channel <c> --target <t> --message <m>``
+       * ``openclaw gateway call <method> --json --params <json>``
+   Shelling out to node is heavier and may be blocked in restricted sandboxes,
+   so the HTTP path is always tried first where it is capable.
+
+Authentication
+--------------
+``gateway.auth.mode = "token"``. The bearer token is resolved (in order) from:
+  1. ``$OPENCLAW_GATEWAY_TOKEN``
+  2. ``gateway.auth.token`` in ``~/.openclaw/openclaw.json``
+Possession of this token == full operator access to the gateway, so it is
+treated like a secret: never logged, never echoed back to callers.
+
+Safety rules enforced here
+--------------------------
   * never ``shell=True``; always list-arg subprocess.
   * every subprocess gets ``env={**os.environ, "MALLOC_ARENA_MAX": "2"}``
-    (Bun/node mitigation noted in the Jarvis environment).
+    (node/bun mitigation noted in the Jarvis environment).
   * reasonable per-call timeouts; nothing blocks the caller forever.
-  * secrets are never logged or echoed back.
+  * secrets (the gateway token) are never logged or echoed back.
   * a privacy boundary blocks outward NL dispatch that references sensitive
     paths (AsthaCash / Payment-Gateway / .ssh / secrets).
 """
@@ -49,9 +73,17 @@ log = logging.getLogger("jarvis.openclaw.actions")
 
 OC_HTTP_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 
-# Resolve the openclaw CLI. Prefer a binary on PATH; fall back to invoking the
-# bundled .mjs entrypoint with node (matches the systemd ExecStart).
+# OpenClaw home + config (token lives here when not in the environment).
+OC_HOME = Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".openclaw"))
+OC_CONFIG = Path(os.environ.get("OPENCLAW_CONFIG", OC_HOME / "openclaw.json"))
+
+# Resolve the openclaw CLI. Prefer a binary on PATH; fall back to the symlinked
+# bin, then to invoking the bundled .mjs entrypoint with node.
 _OC_BIN = shutil.which("openclaw")
+if not _OC_BIN:
+    _cand = Path.home() / ".npm-global" / "bin" / "openclaw"
+    if _cand.exists():
+        _OC_BIN = str(_cand)
 _OC_NODE = shutil.which("node") or "/usr/bin/node"
 _OC_MJS = Path(
     os.environ.get(
@@ -64,7 +96,7 @@ _OC_MJS = Path(
 _SAFE_ENV = {**os.environ, "MALLOC_ARENA_MAX": "2"}
 
 # Default agent + session used for non-interactive NL dispatch. OpenClaw refuses
-# an ``agent`` turn with no target session, so we always bind to a stable,
+# an ``agent`` turn with no session selector, so we always bind to a stable,
 # headless session that is NOT tied to any chat channel.
 OC_AGENT = os.environ.get("OPENCLAW_AGENT", "main")
 OC_SESSION_KEY = os.environ.get("OPENCLAW_SESSION_KEY", "jarvis-bridge")
@@ -81,6 +113,47 @@ _PRIVACY_DENY = (
     "id_ed25519",
     "private key",
 )
+
+# Cache the resolved token so we don't re-read the config on every call.
+_TOKEN_CACHE: str | None = None
+_TOKEN_RESOLVED = False
+
+
+# ── Auth ──────────────────────────────────────────────────────────
+
+
+def _gateway_token() -> str | None:
+    """
+    Resolve the gateway bearer token (env first, then ``openclaw.json``).
+
+    Cached. Returns None if no token can be found. Never logs the value.
+    """
+    global _TOKEN_CACHE, _TOKEN_RESOLVED
+    if _TOKEN_RESOLVED:
+        return _TOKEN_CACHE
+
+    _TOKEN_RESOLVED = True
+    tok = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+    if tok:
+        _TOKEN_CACHE = tok.strip() or None
+        return _TOKEN_CACHE
+
+    try:
+        if OC_CONFIG.exists():
+            cfg = json.loads(OC_CONFIG.read_text(encoding="utf-8"))
+            tok = (
+                cfg.get("gateway", {})
+                .get("auth", {})
+                .get("token")
+            )
+            if isinstance(tok, str) and tok.strip():
+                _TOKEN_CACHE = tok.strip()
+    except Exception as e:  # noqa: BLE001 - defensive; never raise to caller
+        log.debug("could not read gateway token from config: %s", e)
+
+    if _TOKEN_CACHE is None:
+        log.debug("no OpenClaw gateway token resolved (env or config).")
+    return _TOKEN_CACHE
 
 
 def _cli_argv() -> list[str] | None:
@@ -122,7 +195,135 @@ def gateway_alive(timeout: float = 4.0) -> bool:
         return False
 
 
-# ── CLI invocation ───────────────────────────────────────────────
+# ── HTTP tool invocation (PRIMARY path) ──────────────────────────
+
+
+def _extract_tool_text(result: Any) -> str:
+    """
+    Best-effort flatten of a ``/tools/invoke`` result into a string.
+
+    OpenClaw tool results look like
+    ``{"content": [{"type": "text", "text": "..."}], "details": {...}}``.
+    Prefer the joined text blocks; fall back to JSON of ``details`` or the
+    whole result. Never raises.
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        content = result.get("content")
+        if isinstance(content, list):
+            parts = [
+                c.get("text", "")
+                for c in content
+                if isinstance(c, dict) and c.get("type") == "text"
+            ]
+            joined = "\n".join(p for p in parts if p)
+            if joined:
+                return joined
+        details = result.get("details")
+        if details is not None:
+            try:
+                return json.dumps(details)
+            except (TypeError, ValueError):
+                pass
+    try:
+        return json.dumps(result)
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def tools_invoke(
+    tool: str,
+    args: dict | None = None,
+    action: str | None = None,
+    session_key: str | None = None,
+    channel: str | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """
+    Invoke a single OpenClaw tool over HTTP ``POST /tools/invoke``.
+
+    This is the preferred way for Jarvis to make OpenClaw *do* something: it is
+    fast, needs no node subprocess, and is gated by the gateway's tool policy.
+
+    Args:
+        tool: tool name (e.g. ``"sessions_list"``, ``"memory_search"``).
+        args: tool-specific argument object.
+        action: optional ``action`` discriminator some tools accept.
+        session_key: target session key (defaults to the gateway main session).
+        channel: optional message-channel hint (``x-openclaw-message-channel``).
+        timeout: hard HTTP timeout in seconds.
+
+    Returns a dict, never raising:
+        {"ok": True,  "result": <raw>, "text": <flattened str>}
+        {"ok": False, "error": <str>, "status": <int|None>,
+         "denied": <bool>}   # denied=True when the tool isn't allowed (404)
+    """
+    if not tool:
+        return {"ok": False, "error": "tool name required", "status": None,
+                "denied": False}
+
+    try:
+        import requests
+    except ImportError:
+        return {"ok": False, "error": "requests not installed", "status": None,
+                "denied": False}
+
+    token = _gateway_token()
+    if not token:
+        return {"ok": False, "error": "no gateway token available",
+                "status": None, "denied": False}
+
+    body: dict[str, Any] = {"tool": tool, "args": args or {}}
+    if action:
+        body["action"] = action
+    if session_key:
+        body["sessionKey"] = session_key
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    if channel:
+        headers["x-openclaw-message-channel"] = channel
+
+    try:
+        r = requests.post(
+            f"{OC_HTTP_URL}/tools/invoke",
+            headers=headers,
+            data=json.dumps(body),
+            timeout=timeout,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.debug("tools_invoke(%s) transport error: %s", tool, e)
+        return {"ok": False, "error": f"transport error: {e}", "status": None,
+                "denied": False}
+
+    # Parse the JSON body if we can; OpenClaw always returns JSON.
+    try:
+        data = r.json()
+    except ValueError:
+        data = None
+
+    if r.status_code == 200 and isinstance(data, dict) and data.get("ok"):
+        result = data.get("result")
+        return {"ok": True, "result": result,
+                "text": _extract_tool_text(result)}
+
+    # Failure paths. 404 == tool not allowed by policy (caller should fall back).
+    err_msg = "tool invoke failed"
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict):
+            err_msg = err.get("message") or err.get("type") or err_msg
+        elif isinstance(err, str):
+            err_msg = err
+    denied = r.status_code in (404, 401, 403)
+    return {"ok": False, "error": err_msg, "status": r.status_code,
+            "denied": denied}
+
+
+# ── CLI invocation (FALLBACK path) ───────────────────────────────
 
 
 def _run_cli(args: list[str], timeout: float) -> dict[str, Any]:
@@ -186,9 +387,13 @@ def gateway_call(method: str, params: dict | None = None,
     """
     Invoke an OpenClaw gateway RPC method via ``openclaw gateway call``.
 
+    NOTE: This is the CLI (WebSocket RPC) path and requires the node CLI to be
+    runnable. For most "do an action" needs prefer :func:`tools_invoke` (HTTP).
+    ``gateway call`` is kept for read-scope introspection methods such as
+    ``health``, ``status``, ``system-presence``, ``logs.tail``.
+
     Args:
-        method: RPC method name (e.g. "health", "status", "system-presence",
-                "cron.list").
+        method: RPC method name.
         params: JSON-serialisable params object.
         timeout: hard timeout in seconds.
         expect_final: pass ``--expect-final`` (wait for an agent's final reply).
@@ -204,7 +409,7 @@ def gateway_call(method: str, params: dict | None = None,
             return {"ok": False, "error": f"params not JSON-serialisable: {e}"}
     if expect_final:
         args.append("--expect-final")
-    # CLI default RPC timeout is 10s; give the subprocess a little more headroom.
+    # CLI --timeout is in milliseconds; give the subprocess a little headroom.
     args += ["--timeout", str(int(max(1.0, timeout - 2.0) * 1000))]
 
     res = _run_cli(args, timeout=timeout)
@@ -229,7 +434,7 @@ def agent_turn(message: str, timeout: float = 120.0,
                deliver: bool = False, channel: str | None = None) -> dict[str, Any]:
     """
     Run one OpenClaw agent turn (natural-language plan + execute) via the
-    gateway: ``openclaw agent --message <text> --json``.
+    gateway CLI: ``openclaw agent --message <text> --json``.
 
     Enforces the privacy boundary: refuses messages that reference sensitive
     paths/resources. Never delivers to a chat channel unless ``deliver=True``.
@@ -250,6 +455,7 @@ def agent_turn(message: str, timeout: float = 120.0,
         args.append("--deliver")
     if channel:
         args += ["--channel", channel]
+    # agent --timeout is in SECONDS (unlike gateway call which is ms).
     args += ["--timeout", str(int(timeout))]
 
     res = _run_cli(args, timeout=timeout + 10.0)
@@ -264,15 +470,25 @@ def agent_turn(message: str, timeout: float = 120.0,
     return {"ok": True, "raw": res["stdout"]}
 
 
-def message_send(message: str, target: str, timeout: float = 20.0) -> dict[str, Any]:
+def message_send(message: str, target: str,
+                 channel: str | None = None,
+                 timeout: float = 20.0) -> dict[str, Any]:
     """
     Send a chat message through OpenClaw: ``openclaw message send``.
+
+    ``--channel`` is required by OpenClaw when more than one channel is
+    configured; we pass it through when given. On this host the only configured
+    channel is Telegram, so ``channel`` may be omitted and OpenClaw will infer
+    it.
 
     Returns: {ok, raw?, error?}. Never raises.
     """
     if not message or not target:
         return {"ok": False, "error": "message and target are required"}
     args = ["message", "send", "--target", target, "--message", message]
+    if channel:
+        args = ["message", "send", "--channel", channel,
+                "--target", target, "--message", message]
     res = _run_cli(args, timeout=timeout)
     if not res["ok"]:
         return {"ok": False,
