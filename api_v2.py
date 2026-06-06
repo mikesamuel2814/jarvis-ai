@@ -568,7 +568,7 @@ async def pending():
 
 @app.post("/approve/{request_id}", dependencies=[Depends(require_api_key)])
 async def approve(request_id: str):
-    """Approve and execute a pending action (OpenClaw-first→executor)."""
+    """Approve and execute a pending action or task flow (OpenClaw-first→executor)."""
     try:
         from permissions import respond, get_request
         from action_flow import run_action_step
@@ -580,6 +580,28 @@ async def approve(request_id: str):
                 content={"success": False, "output": "Request not found or expired."},
             )
         respond(request_id, "approve")
+
+        # Task-level approval: run every step in the flow autonomously.
+        if req.get("kind") == "task":
+            steps = req.get("steps", [])
+            step_results = []
+            step_lines = []
+            for i, step in enumerate(steps, start=1):
+                r = run_action_step(step["action"], step.get("arg", ""))
+                step_results.append(r)
+                icon = "✅" if r.get("success") else "❌"
+                step_lines.append(f"{icon} {i}. {step['desc']}: {r.get('output', '')[:200]}")
+                if not r.get("success"):
+                    step_lines.append(f"Halted at step {i}.")
+                    break
+            summary = "\n".join(step_lines)
+            _send_telegram_direct(
+                f"🔐 Task `{request_id}` complete:\n{summary}"
+            )
+            all_ok = all(r.get("success") for r in step_results)
+            return {"success": all_ok, "steps": step_lines, "results": step_results}
+
+        # Single-action approval (legacy path).
         result = run_action_step(req["action"], req.get("arg", ""))
         status = "✅ Done" if result.get("success") else "❌ Failed"
         _send_telegram_direct(
