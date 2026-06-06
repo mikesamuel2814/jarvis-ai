@@ -94,6 +94,24 @@ VISION_MODEL = CONFIG.get("model", {}).get("vision", "llava:7b")
 API_BASE = os.environ.get("JARVIS_API_URL", f"http://127.0.0.1:{API_PORT}")
 OWNER = CONFIG.get("owner", "Mike")
 
+_SECRETS_FILE = JARVIS_HOME / "config" / "secrets.env"
+
+
+def _api_key() -> str:
+    key = os.environ.get("JARVIS_API_KEY", "")
+    if not key and _SECRETS_FILE.exists():
+        for line in _SECRETS_FILE.read_text().splitlines():
+            if line.startswith("JARVIS_API_KEY="):
+                key = line.split("=", 1)[1].strip()
+                break
+    return key
+
+
+def _ah() -> dict:
+    """Auth headers for all authenticated Jarvis API calls."""
+    k = _api_key()
+    return {"X-API-Key": k} if k else {}
+
 
 def get_history(uid: int) -> list:
     if uid not in _histories:
@@ -275,12 +293,12 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
     endpoint = "/query" if _is_casual(text) else "/claude-plan"
 
     try:
-        resp = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=180)
+        resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
         # Retry once on 503 — model may still be loading
         if resp.status_code == 503:
             import time
             time.sleep(8)
-            resp = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=180)
+            resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
         resp.raise_for_status()
         data = resp.json()
         answer = data.get("response", "No response received.")
@@ -304,7 +322,7 @@ def _bar(pct: float, width: int = 10) -> str:
 def get_stats() -> str:
     """Jarvis brain stats card."""
     try:
-        resp = requests.get(f"{API_BASE}/stats", timeout=10)
+        resp = requests.get(f"{API_BASE}/stats", headers=_ah(), timeout=10)
         resp.raise_for_status()
         d = resp.json()
         chunks = d.get("total_chunks", d.get("memory_chunks", 0))
@@ -340,8 +358,8 @@ def get_health() -> str:
 def get_sysinfo() -> str:
     """Full system stats card — minimal, one screen."""
     try:
-        si = requests.get(f"{API_BASE}/sysinfo", timeout=15).json()
-        st = requests.get(f"{API_BASE}/stats", timeout=10).json()
+        si = requests.get(f"{API_BASE}/sysinfo", headers=_ah(), timeout=15).json()
+        st = requests.get(f"{API_BASE}/stats", headers=_ah(), timeout=10).json()
         hl = requests.get(f"{API_BASE}/health", timeout=10).json()
 
         cpu = si.get("cpu", {})
@@ -415,7 +433,7 @@ def get_sysinfo() -> str:
 
 def trigger_index() -> str:
     try:
-        resp = requests.post(f"{API_BASE}/index", json={}, timeout=300)
+        resp = requests.post(f"{API_BASE}/index", json={}, headers=_ah(), timeout=300)
         resp.raise_for_status()
         d = resp.json()
         return f"Indexing complete. Total chunks: {d.get('chunks', 'N/A')}"
@@ -706,6 +724,7 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         resp = requests.post(
             f"{API_BASE}/action",
             json={"action": action, "arg": arg},
+            headers=_ah(),
             timeout=90,
         )
         d = resp.json()
@@ -826,7 +845,7 @@ def main():
         req_id = args[0].upper()
         await update.message.chat.send_action("typing")
         try:
-            resp = requests.post(f"{API_BASE}/approve/{req_id}", timeout=90)
+            resp = requests.post(f"{API_BASE}/approve/{req_id}", headers=_ah(), timeout=90)
             d = resp.json()
             output = d.get("output", "")
             ok = d.get("success", True)
@@ -843,7 +862,7 @@ def main():
             return
         req_id = args[0].upper()
         try:
-            requests.post(f"{API_BASE}/deny/{req_id}", timeout=10)
+            requests.post(f"{API_BASE}/deny/{req_id}", headers=_ah(), timeout=10)
             await send(update, f"❌ Denied: {req_id}")
         except Exception as e:
             await send(update, f"Error: {e}")
@@ -863,7 +882,7 @@ def main():
         elif data.startswith("approve_"):
             req_id = data.split("_", 1)[1]
             try:
-                resp = requests.post(f"{API_BASE}/approve/{req_id}", timeout=90)
+                resp = requests.post(f"{API_BASE}/approve/{req_id}", headers=_ah(), timeout=90)
                 d = resp.json()
                 output = d.get("output", "")
                 ok = d.get("success", True)
@@ -875,7 +894,7 @@ def main():
         elif data.startswith("deny_"):
             req_id = data.split("_", 1)[1]
             try:
-                requests.post(f"{API_BASE}/deny/{req_id}", timeout=10)
+                requests.post(f"{API_BASE}/deny/{req_id}", headers=_ah(), timeout=10)
                 await query.edit_message_text(f"❌ Denied")
             except Exception as e:
                 await query.edit_message_text(f"Error: {e}")
@@ -890,7 +909,7 @@ def main():
                 reply = get_health()
             elif cmd == "selfcheck":
                 try:
-                    d = requests.get(f"{API_BASE}/selfcheck", timeout=20).json()
+                    d = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20).json()
                     overall = d.get("overall", "unknown")
                     icon = "✅" if overall == "ok" else "⚠️"
                     lines = [f"{icon} *Jarvis Self-Check* — {overall.upper()}\n"]
@@ -903,7 +922,7 @@ def main():
                     reply = f"Self-check failed: {e}"
             elif cmd == "learn":
                 try:
-                    requests.post(f"{API_BASE}/learn", timeout=10)
+                    requests.post(f"{API_BASE}/learn", headers=_ah(), timeout=10)
                     reply = "🧠 Brain training started. Check /stats in a minute."
                 except Exception as e:
                     reply = f"Error: {e}"
@@ -922,7 +941,7 @@ def main():
                          f"*🔐 APPROVE ({len(appr)})*\n" + "  ".join(f"`{a}`" for a in appr))
             elif cmd == "pending":
                 try:
-                    d = requests.get(f"{API_BASE}/pending", timeout=10).json() if hasattr(requests, 'x') else None
+                    d = requests.get(f"{API_BASE}/pending", headers=_ah(), timeout=10).json() if hasattr(requests, 'x') else None
                     import json as _j, pathlib as _p
                     pf = _p.Path("/home/kali/.jarvis/data/pending_approvals.json")
                     pending = _j.loads(pf.read_text()) if pf.exists() else {}
@@ -1007,7 +1026,7 @@ def main():
 
     def _send_feedback(iid: str, rating: str) -> bool:
         try:
-            r = requests.post(f"{API_BASE}/feedback", json={"interaction_id": iid, "rating": rating}, timeout=5)
+            r = requests.post(f"{API_BASE}/feedback", json={"interaction_id": iid, "rating": rating}, headers=_ah(), timeout=5)
             return r.ok
         except Exception:
             return False
@@ -1038,7 +1057,7 @@ def main():
             await send(update, "No recent response to correct.")
             return
         try:
-            r = requests.post(f"{API_BASE}/correct", json={"interaction_id": iid, "correction": correction}, timeout=5)
+            r = requests.post(f"{API_BASE}/correct", json={"interaction_id": iid, "correction": correction}, headers=_ah(), timeout=5)
             if r.ok:
                 await send(update, f"Correction saved. Jarvis will learn from this.")
             else:
@@ -1049,7 +1068,7 @@ def main():
     async def learn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running brain training in background...")
         try:
-            r = requests.post(f"{API_BASE}/learn", timeout=10)
+            r = requests.post(f"{API_BASE}/learn", headers=_ah(), timeout=10)
             if r.ok:
                 await send(update, "Brain training started. Check /stats in a minute.")
             else:
