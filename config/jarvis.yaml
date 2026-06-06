@@ -32,3 +32,14 @@ openclaw:
   enabled: true
   vps_host: 38.47.35.16
   tailscale_ip: 100.110.210.103
+kali:
+  authorized_targets:
+    - api.asthacash.com
+    - asthacash.com
+    - app.asthacash.com
+    - starline.com
+    - conztru.com
+    - 38.47.35.16
+    - 100.110.210.103
+    - localhost
+    - 127.0.0.1

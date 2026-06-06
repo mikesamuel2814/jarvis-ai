@@ -582,6 +582,12 @@ HELP_TEXT = (
     "━━━ <b>🛡 Security (Kali)</b> ━━━\n"
     "/kali <i>tool target</i> — Run pentest tool\n"
     "/scans — List recent scan reports\n\n"
+    "━━━ <b>🧪 Self-Test &amp; Diagnostics</b> ━━━\n"
+    "/probe <i>[question]</i> — Test phi4-mini (timing + tokens)\n"
+    "/skills — Actions, memory chunks, loaded models\n"
+    "/recall <i>[topic]</i> — What Jarvis remembers about you\n"
+    "/objectives — Your profile, projects &amp; Jarvis goals\n"
+    "/benchmark <i>[q]</i> — All 3 models side-by-side\n\n"
     "━━━ <b>🧠 Learning &amp; Memory</b> ━━━\n"
     "/correct <i>text</i> — Correct last answer (trains brain)\n"
     "/learn — Run brain training now\n"
@@ -589,11 +595,11 @@ HELP_TEXT = (
     "━━━ <b>⚙️ Settings</b> ━━━\n"
     "/remember <i>key value</i> — Save a personal fact\n"
     "/voice on|off — Toggle voice audio responses\n"
-    "/new — Fresh session (clear history + ready for new instructions)\n"
+    "/new — Fresh session (clear history)\n"
     "/clear — Clear chat history\n"
     "/help — Show this message\n\n"
     "<i>💡 Tip: Tap 👍 or 👎 after any reply to train Jarvis.</i>\n"
-    "<i>Or just chat naturally — Jarvis understands context.</i>"
+    "<i>Drop files into ~/.jarvis/inbox/ to auto-train from them.</i>"
 )
 
 
@@ -1733,10 +1739,9 @@ def main():
             return
 
         # run_action_via_api returns a Markdown-style string; convert to HTML for display.
-        # Prepend scope_warn (already HTML) if present.
+        # scope_warn was already sent in the "dispatching" message above — do NOT repeat it.
         result_html = _to_html(result)
-        final = (scope_warn + result_html) if scope_warn else result_html
-        await send(update, final, already_html=True)
+        await send(update, result_html, already_html=True)
 
     async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """List the last ~10 scan reports in ~/.jarvis/scans/."""
@@ -1836,39 +1841,74 @@ def main():
     async def recall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show what Jarvis remembers about Mike"""
         from fmt import esc
-        topic = " ".join(context.args) if context.args else "Mike Samuel profile preferences projects"
-        await send(update, f"🔍 Recalling: <code>{esc(topic)}</code>…", already_html=True)
+        topic = " ".join(context.args) if context.args else ""
+        q = f"Tell me everything you remember about Mike Samuel — his projects, goals, preferences, and background. Topic: {topic}" if topic else "Tell me everything you remember about Mike Samuel — his projects, goals, preferences, and background."
+        await send(update, "🔍 Searching memory…")
         try:
-            r = requests.post(f"{API_BASE}/recall", json={"topic": topic}, headers=_ah(), timeout=20)
+            r = requests.post(f"{API_BASE}/recall", json={"topic": topic or "Mike Samuel profile preferences projects"}, headers=_ah(), timeout=20)
             d = r.json()
             chunks = d.get("chunks", [])
             if not chunks:
-                await send(update, "🤷 Nothing found in memory for that topic. Try /index to re-index.")
+                await send(update, "🤷 Nothing found. Try /index to rebuild memory.")
                 return
-            lines = [f"<b>🧠 Memory Recall: {esc(topic)}</b>\n"]
+            lines = [f"<b>🧠 Memory Recall{': ' + esc(topic) if topic else ''}</b>\n"]
             for i, c in enumerate(chunks[:5], 1):
-                lines.append(f"<b>{i}.</b> {esc(str(c)[:300])}")
+                # c may be dict with 'text','source','distance' or just a string
+                if isinstance(c, dict):
+                    text = str(c.get("text", c.get("document", str(c))))[:300]
+                    source = c.get("source", c.get("metadata", {}).get("source", ""))
+                    dist = c.get("distance", "")
+                    dist_str = f" <i>(score: {round(float(dist),2)})</i>" if dist != "" else ""
+                    src_str = f" <code>{esc(str(source))}</code>" if source else ""
+                    lines.append(f"<b>{i}.</b>{src_str}{dist_str}\n{esc(text)}")
+                else:
+                    lines.append(f"<b>{i}.</b> {esc(str(c)[:300])}")
             await send(update, "\n\n".join(lines), already_html=True)
         except Exception as e:
-            await send(update, f"❌ Recall failed: {e}")
+            await send(update, f"❌ Recall failed: {esc(str(e))}", already_html=True)
 
     async def objectives_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show Jarvis main objectives and Mike's profile"""
         from fmt import esc
         try:
-            r = requests.get(f"{API_BASE}/objectives", headers=_ah(), timeout=10)
-            d = r.json()
-            lines = ["<b>🎯 Jarvis Objectives & Profile</b>\n"]
-            for section, content in d.items():
-                lines.append(f"<b>{esc(section)}:</b>")
-                if isinstance(content, list):
-                    for item in content:
-                        lines.append(f"  · {esc(str(item))}")
-                else:
-                    lines.append(f"  {esc(str(content))}")
+            import yaml as _yaml
+            profile_path = JARVIS_HOME / "config" / "mike_profile.yaml"
+            with open(profile_path) as f:
+                profile = _yaml.safe_load(f)
+            r_ls = requests.get(f"{API_BASE}/learning-stats", headers=_ah(), timeout=8)
+            ls = r_ls.json() if r_ls.ok else {}
+
+            identity = profile.get("identity", {})
+            hardware = profile.get("hardware", {})
+            projects = profile.get("projects", [])
+            jarvis_stack = profile.get("jarvis_stack", {})
+            routing = profile.get("model_routing", {})
+
+            lines = ["<b>🎯 Jarvis Objectives &amp; Profile</b>\n"]
+            lines.append(f"👤 <b>Owner:</b> {esc(identity.get('name', 'Mike Samuel'))} · <code>{esc(identity.get('email', ''))}</code>")
+            lines.append(f"🎭 <b>Role:</b> {esc(identity.get('role', ''))}")
+            lines.append(f"🕐 <b>Timezone:</b> <code>{esc(identity.get('timezone', 'Asia/Dhaka'))}</code>\n")
+
+            lines.append(f"🖥 <b>Hardware:</b> {esc(hardware.get('cpu', ''))} · {esc(hardware.get('ram', ''))} RAM · {esc(hardware.get('gpu', ''))}")
+            if hardware.get('upgrade_planned'):
+                lines.append(f"⬆️ <b>Upgrade:</b> {esc(hardware['upgrade_planned'])}\n")
+
+            if projects:
+                lines.append("<b>📁 Active Projects:</b>")
+                for p in projects:
+                    if isinstance(p, dict):
+                        lines.append(f"  · <b>{esc(p.get('name',''))}</b> — {esc(p.get('type',''))} · VPS: <code>{esc(p.get('vps',''))}</code>")
+
+            lines.append(f"\n🤖 <b>Brain:</b> {esc(jarvis_stack.get('brain', ''))} · Fast: <code>{esc(jarvis_stack.get('fast_model',''))}</code> · Code: <code>{esc(jarvis_stack.get('code_model',''))}</code>")
+            lines.append(f"📱 <b>Telegram:</b> <code>{esc(jarvis_stack.get('telegram_bot','@MikePiJarvisBot'))}</code>")
+
+            if ls:
+                total = ls.get("total", "?"); good = ls.get("good", "?"); bad = ls.get("bad", "?")
+                lines.append(f"\n📊 <b>Training:</b> <code>{total}</code> interactions · 👍 <code>{good}</code> · 👎 <code>{bad}</code>")
+
             await send(update, "\n".join(lines), already_html=True)
         except Exception as e:
-            await send(update, f"❌ Objectives fetch failed: {e}")
+            await send(update, f"❌ Objectives failed: {esc(str(e))}", already_html=True)
 
     async def benchmark_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Run a quick 3-model benchmark"""
