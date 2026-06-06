@@ -137,9 +137,12 @@ class IDSHook:
     def check_ssh_keys(self) -> List[dict]:
         alerts = []
         for fp in self.SSH_AUTH_DIRS:
-            if not fp.exists():
+            try:
+                if not fp.exists():
+                    continue
+                current = fp.read_text()
+            except PermissionError:
                 continue
-            current = fp.read_text()
             chk = hashlib.sha256(current.encode()).hexdigest()
             key = str(fp)
             if key in self.state["ssh_keys_checksum"]:

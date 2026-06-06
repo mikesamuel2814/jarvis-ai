@@ -313,8 +313,9 @@ class SecretVault:
         except Exception:
             pass  # best-effort
 
-    def migrate_from_env(self, env_path: Path, tool_allowlist: Optional[List[str]] = None):
+    def migrate_from_env(self, env_path, tool_allowlist: Optional[List[str]] = None):
         """Bulk-import KEY=VALUE pairs from a .env file into the vault."""
+        env_path = Path(env_path)
         if not env_path.exists():
             return
         with open(env_path, "r", encoding="utf-8") as fh:

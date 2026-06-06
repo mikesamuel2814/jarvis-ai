@@ -1,0 +1,30 @@
+2026-06-07 04:44:24,406 | [OK] action=SET key=test_key tool=test_tool session=local 
+2026-06-07 04:44:24,449 | [OK] action=GET key=test_key tool=test_tool session=local 
+2026-06-07 04:44:24,498 | [OK] action=SET key=api_key tool=vault_cli session=local 
+2026-06-07 04:44:24,541 | [OK] action=GET key=api_key tool=allowed_tool session=local 
+2026-06-07 04:44:24,546 | [FAIL] action=GET key=api_key tool=bad_tool session=local access_denied
+2026-06-07 04:44:24,594 | [OK] action=SET key=db_pass tool=vault_cli session=local 
+2026-06-07 04:44:24,637 | [OK] action=GET key=db_pass tool=unknown session=local 
+2026-06-07 04:44:25,005 | [OK] action=SET key=test_key tool=test_tool session=local 
+2026-06-07 04:44:25,048 | [OK] action=GET key=test_key tool=test_tool session=local 
+2026-06-07 04:44:25,096 | [OK] action=SET key=api_key tool=vault_cli session=local 
+2026-06-07 04:44:25,139 | [OK] action=GET key=api_key tool=allowed_tool session=local 
+2026-06-07 04:44:25,143 | [FAIL] action=GET key=api_key tool=bad_tool session=local access_denied
+2026-06-07 04:44:25,189 | [OK] action=SET key=db_pass tool=vault_cli session=local 
+2026-06-07 04:44:25,232 | [OK] action=GET key=db_pass tool=unknown session=local 
+2026-06-07 04:45:00,528 | [OK] action=SET key=PORT tool=vault_cli session=local 
+2026-06-07 04:45:00,578 | [OK] action=SET key=CORS_ORIGIN tool=vault_cli session=local 
+2026-06-07 04:45:00,627 | [OK] action=SET key=ALLOW_DEV_AUTH tool=vault_cli session=local 
+2026-06-07 04:45:00,676 | [OK] action=SET key=SUPABASE_URL tool=vault_cli session=local 
+2026-06-07 04:45:00,726 | [OK] action=SET key=SUPABASE_ANON_KEY tool=vault_cli session=local 
+2026-06-07 04:45:00,773 | [OK] action=SET key=SUPABASE_SERVICE_ROLE_KEY tool=vault_cli session=local 
+2026-06-07 04:45:00,826 | [OK] action=SET key=SUPABASE_PUBLISHABLE_KEY tool=vault_cli session=local 
+2026-06-07 04:45:00,874 | [OK] action=SET key=SUPABASE_SECRET_KEY tool=vault_cli session=local 
+2026-06-07 04:45:00,920 | [OK] action=SET key=SUPABASE_DB_PASSWORD tool=vault_cli session=local 
+2026-06-07 04:45:00,967 | [OK] action=SET key=DATABASE_URL tool=vault_cli session=local 
+2026-06-07 04:45:01,013 | [OK] action=SET key=STUN_URLS tool=vault_cli session=local 
+2026-06-07 04:45:01,059 | [OK] action=SET key=TURN_URL tool=vault_cli session=local 
+2026-06-07 04:45:01,105 | [OK] action=SET key=TURN_USERNAME tool=vault_cli session=local 
+2026-06-07 04:45:01,152 | [OK] action=SET key=TURN_CREDENTIAL tool=vault_cli session=local 
+2026-06-07 04:45:01,199 | [OK] action=SET key=RING_TIMEOUT_MS tool=vault_cli session=local 
+2026-06-07 04:45:01,245 | [OK] action=SET key=FIREBASE_SERVICE_ACCOUNT_JSON tool=vault_cli session=local 
