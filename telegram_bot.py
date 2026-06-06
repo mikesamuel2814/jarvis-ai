@@ -921,8 +921,9 @@ def main():
                 output = d.get("output", "")
                 ok = d.get("success", True)
                 icon = "✅" if ok else "❌"
-                reply = f"{icon} Done\n```\n{output[:1500]}\n```" if output else f"{icon} Done."
-                await query.edit_message_text(reply, parse_mode="Markdown")
+                from fmt import bold, pre, esc
+                reply = f"{icon} {bold('Done')}\n\n{pre(esc(output[:1500]))}" if output else f"{icon} {bold('Done.')}"
+                await query.edit_message_text(reply, parse_mode="HTML")
             except Exception as e:
                 await query.edit_message_text(f"Error: {e}")
         elif data.startswith("deny_"):
@@ -946,9 +947,10 @@ def main():
                     d = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20).json()
                     overall = d.get("overall", "unknown")
                     icon = "✅" if overall == "ok" else "⚠️"
-                    lines = [f"{icon} *Jarvis Self-Check* — {overall.upper()}\n"]
+                    from fmt import bold, code, esc
+                    lines = [f"{icon} {bold('Jarvis Self-Check')} — {esc(overall.upper())}\n"]
                     for k, v in d.get("checks", {}).items():
-                        lines.append(f"{_check_icon(k, v)} `{k}`: {v}")
+                        lines.append(f"{_check_icon(k, v)} {code(esc(k))}: {esc(str(v))}")
                     reply = "\n".join(lines)
                 except Exception as e:
                     reply = f"Self-check failed: {e}"
@@ -964,13 +966,14 @@ def main():
                 reply = trigger_index()
             elif cmd == "actions":
                 from executor import ACTIONS, AUTO, CONFIRM, APPROVE
+                from fmt import bold, code, esc
                 auto = [k for k, v in ACTIONS.items() if v["tier"] == AUTO]
                 conf = [k for k, v in ACTIONS.items() if v["tier"] == CONFIRM]
                 appr = [k for k, v in ACTIONS.items() if v["tier"] == APPROVE]
-                reply = (f"*Actions ({len(ACTIONS)} total)*\n\n"
-                         f"*⚡ AUTO ({len(auto)})*\n" + "  ".join(f"`{a}`" for a in auto) + "\n\n"
-                         f"*🔔 CONFIRM ({len(conf)})*\n" + "  ".join(f"`{a}`" for a in conf) + "\n\n"
-                         f"*🔐 APPROVE ({len(appr)})*\n" + "  ".join(f"`{a}`" for a in appr))
+                reply = (f"{bold(f'Actions ({len(ACTIONS)} total)')}\n\n"
+                         f"{bold('⚡ AUTO')} ({len(auto)})\n" + "  ".join(code(esc(a)) for a in auto) + "\n\n"
+                         f"{bold('🔔 CONFIRM')} ({len(conf)})\n" + "  ".join(code(esc(a)) for a in conf) + "\n\n"
+                         f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(esc(a)) for a in appr))
             elif cmd == "pending":
                 try:
                     d = requests.get(f"{API_BASE}/pending", headers=_ah(), timeout=10).json() if hasattr(requests, 'x') else None
@@ -978,9 +981,10 @@ def main():
                     pf = _p.Path("/home/kali/.jarvis/data/pending_approvals.json")
                     pending = _j.loads(pf.read_text()) if pf.exists() else {}
                     if pending:
-                        lines = ["*Pending Approvals*\n"]
+                        from fmt import bold, code, esc
+                        lines = [f"{bold('Pending Approvals')}\n"]
                         for rid, req in pending.items():
-                            lines.append(f"• `{rid}` — {req.get('action', '?')}")
+                            lines.append(f"• {code(esc(rid))} — {esc(req.get('action', '?'))}")
                         reply = "\n".join(lines)
                     else:
                         reply = "No pending approvals."
@@ -988,72 +992,72 @@ def main():
                     reply = f"Error: {e}"
             else:
                 reply = f"Unknown command: {cmd}"
-            await query.message.reply_text(_to_legacy_markdown(reply), parse_mode="Markdown")
+            await query.message.reply_text(_to_html(reply), parse_mode="HTML")
 
         elif data.startswith("act_"):
             action = data[4:]
             await query.message.chat.send_action("typing")
             result = run_action_via_api(action)
-            await query.message.reply_text(_to_legacy_markdown(result), parse_mode="Markdown")
+            await query.message.reply_text(_to_html(result), parse_mode="HTML")
 
     def _build_reference_keyboard() -> "InlineKeyboardMarkup":
         B = InlineKeyboardButton
         return InlineKeyboardMarkup([
             # ── Commands ─────────────────────────────────────────────────────
-            [B("📊 Stats",    callback_data="cmd_stats"),
-             B("🖥 Sysinfo",  callback_data="cmd_sysinfo"),
-             B("❤️ Health",   callback_data="cmd_health"),
-             B("🔍 Selfcheck",callback_data="cmd_selfcheck")],
-            [B("📋 Actions",  callback_data="cmd_actions"),
-             B("⏳ Pending",  callback_data="cmd_pending"),
-             B("🧠 Learn",    callback_data="cmd_learn"),
-             B("🔄 Index",    callback_data="cmd_index")],
+            [B("📊 Stats",       callback_data="cmd_stats"),
+             B("🖥️ System Info", callback_data="cmd_sysinfo"),
+             B("❤️ Health",      callback_data="cmd_health"),
+             B("🔍 Self Check",  callback_data="cmd_selfcheck")],
+            [B("⚡ Actions",     callback_data="cmd_actions"),
+             B("⏳ Pending",     callback_data="cmd_pending"),
+             B("🧠 Train Brain", callback_data="cmd_learn"),
+             B("🗂️ Re-Index",   callback_data="cmd_index")],
             # ── AUTO: local system ────────────────────────────────────────────
-            [B("ps",     callback_data="act_ps"),
-             B("disk",   callback_data="act_disk"),
-             B("memory", callback_data="act_memory"),
-             B("uptime", callback_data="act_uptime")],
-            [B("gpu",      callback_data="act_gpu"),
-             B("services", callback_data="act_services"),
-             B("ports",    callback_data="act_ports"),
-             B("network",  callback_data="act_network")],
-            [B("top5 cpu",    callback_data="act_top5_cpu"),
-             B("top5 mem",    callback_data="act_top5_mem"),
-             B("tailscale",   callback_data="act_tailscale"),
-             B("AI models",   callback_data="act_ollama_models")],
-            [B("git status",     callback_data="act_git_status_all"),
-             B("nginx",          callback_data="act_nginx_status"),
-             B("pm2",            callback_data="act_pm2_status"),
-             B("jarvis logs",    callback_data="act_jarvis_logs_tail")],
+            [B("⚡ Processes",  callback_data="act_ps"),
+             B("💾 Disk",       callback_data="act_disk"),
+             B("🧠 Memory",     callback_data="act_memory"),
+             B("⏱ Uptime",     callback_data="act_uptime")],
+            [B("🎮 GPU",        callback_data="act_gpu"),
+             B("🔧 Services",   callback_data="act_services"),
+             B("🌐 Ports",      callback_data="act_ports"),
+             B("📡 Network",    callback_data="act_network")],
+            [B("📈 Top CPU",    callback_data="act_top5_cpu"),
+             B("📊 Top RAM",    callback_data="act_top5_mem"),
+             B("🔒 Tailscale",  callback_data="act_tailscale"),
+             B("🤖 AI Models",  callback_data="act_ollama_models")],
+            [B("📦 Git Status", callback_data="act_git_status_all"),
+             B("🌍 Nginx",      callback_data="act_nginx_status"),
+             B("🚀 PM2",        callback_data="act_pm2_status"),
+             B("📝 Jarvis Logs",callback_data="act_jarvis_logs_tail")],
             # ── AUTO: projects ────────────────────────────────────────────────
-            [B("project status", callback_data="act_project_status"),
-             B("docker ps",      callback_data="act_docker_ps"),
-             B("vps disk",       callback_data="act_vps_disk"),
-             B("vps ps",         callback_data="act_vps_ps")],
-            [B("gw logs",   callback_data="act_pm2_logs_gateway"),
-             B("sl logs",   callback_data="act_pm2_logs_starline"),
-             B("git log gw",callback_data="act_git_log_gw"),
-             B("git log sl",callback_data="act_git_log_sl")],
+            [B("📁 Projects",   callback_data="act_project_status"),
+             B("🐳 Docker",     callback_data="act_docker_ps"),
+             B("☁️ VPS Disk",   callback_data="act_vps_disk"),
+             B("☁️ VPS Procs",  callback_data="act_vps_ps")],
+            [B("💳 GW Logs",    callback_data="act_pm2_logs_gateway"),
+             B("🏠 SL Logs",    callback_data="act_pm2_logs_starline"),
+             B("💳 GW History", callback_data="act_git_log_gw"),
+             B("🏠 SL History", callback_data="act_git_log_sl")],
             # ── CONFIRM ───────────────────────────────────────────────────────
-            [B("🔔 restart jarvis",    callback_data="act_restart_jarvis"),
-             B("🔔 restart telegram",  callback_data="act_restart_telegram"),
-             B("🔔 restart ollama",    callback_data="act_restart_ollama")],
-            [B("🔔 reindex",           callback_data="act_reindex"),
-             B("🔔 pull gw",           callback_data="act_git_pull_gw"),
-             B("🔔 pull sl",           callback_data="act_git_pull_sl")],
-            [B("🔔 build gw",          callback_data="act_npm_build_gw"),
-             B("🔔 build sl",          callback_data="act_pnpm_build_sl"),
-             B("🔔 vps pull gw",       callback_data="act_vps_git_pull_gw")],
+            [B("🔄 Restart Jarvis",  callback_data="act_restart_jarvis"),
+             B("📱 Restart Bot",     callback_data="act_restart_telegram"),
+             B("🤖 Restart Ollama",  callback_data="act_restart_ollama")],
+            [B("🗂 Reindex",         callback_data="act_reindex"),
+             B("⬇️ Pull Gateway",    callback_data="act_git_pull_gw"),
+             B("⬇️ Pull Starline",   callback_data="act_git_pull_sl")],
+            [B("🔨 Build Gateway",   callback_data="act_npm_build_gw"),
+             B("🔨 Build Starline",  callback_data="act_pnpm_build_sl"),
+             B("☁️ VPS Pull GW",     callback_data="act_vps_git_pull_gw")],
             # ── APPROVE ───────────────────────────────────────────────────────
-            [B("🔐 deploy vps",  callback_data="act_deploy_vps"),
-             B("🔐 reboot",      callback_data="act_reboot"),
-             B("🔐 update sys",  callback_data="act_update_system")],
+            [B("🚀 Deploy VPS",  callback_data="act_deploy_vps"),
+             B("♻️ Reboot",      callback_data="act_reboot"),
+             B("⬆️ Update System",callback_data="act_update_system")],
         ])
 
     def _feedback_keyboard(iid: str) -> "InlineKeyboardMarkup":
         return InlineKeyboardMarkup([[
-            InlineKeyboardButton("👍", callback_data=f"good_{iid}"),
-            InlineKeyboardButton("👎", callback_data=f"bad_{iid}"),
+            InlineKeyboardButton("👍 Good", callback_data=f"good_{iid}"),
+            InlineKeyboardButton("👎 Needs Work", callback_data=f"bad_{iid}"),
         ]])
 
     def _send_feedback(iid: str, rating: str) -> bool:
@@ -1125,8 +1129,8 @@ def main():
             req_id = d.get("request_id", "")
             if req_id:
                 keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✅ Run Task", callback_data=f"approve_{req_id}"),
-                    InlineKeyboardButton("❌ Cancel",   callback_data=f"deny_{req_id}"),
+                    InlineKeyboardButton("✅ Run Now", callback_data=f"approve_{req_id}"),
+                    InlineKeyboardButton("❌ Cancel",  callback_data=f"deny_{req_id}"),
                 ]])
                 await update.message.reply_text(
                     f"🔐 {bold('Claude Task')} <code>{req_id}</code>\n\n"
@@ -1462,8 +1466,9 @@ def main():
                 await send(update, result_text)
                 return
             elif tier in (CONFIRM, APPROVE):
+                from fmt import bold, esc
                 tier_label = "⚡" if tier == CONFIRM else "🔐"
-                msg = f"{tier_label} *{entry['desc']}*\n\nConfirm?"
+                msg = f"{tier_label} {bold(esc(entry['desc']))}\n\nConfirm?"
                 try:
                     resp = requests.post(
                         f"{API_BASE}/action",
@@ -1475,11 +1480,11 @@ def main():
                     req_id = d.get("request_id", "")
                     keyboard = InlineKeyboardMarkup([
                         [
-                            InlineKeyboardButton("✅ Yes", callback_data=f"approve_{req_id}"),
-                            InlineKeyboardButton("❌ No",  callback_data=f"deny_{req_id}"),
+                            InlineKeyboardButton("✅ Approve & Run", callback_data=f"approve_{req_id}"),
+                            InlineKeyboardButton("❌ Deny",          callback_data=f"deny_{req_id}"),
                         ]
                     ])
-                    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="Markdown")
+                    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="HTML")
                 except Exception:
                     await send(update, run_action_via_api(action))
                 return
