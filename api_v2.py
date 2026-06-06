@@ -263,8 +263,9 @@ async def health():
         status["ollama"] = "error"
         status["status"] = "degraded"
     try:
-        get_collection().count()
+        col = get_collection()
         status["chromadb"] = "ok"
+        status["memory_chunks"] = col.count()
     except Exception:
         status["chromadb"] = "error"
         status["status"] = "degraded"

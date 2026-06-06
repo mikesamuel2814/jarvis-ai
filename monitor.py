@@ -17,7 +17,7 @@ import requests
 import yaml
 
 JARVIS_HOME = Path.home() / ".jarvis"
-CONFIG_FILE = JARVIS_HOME / "config" / "jarvis_v2.yaml"
+CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
 LOG_FILE = JARVIS_HOME / "logs" / "monitor.log"
 STATE_FILE = JARVIS_HOME / "data" / "monitor_state.json"
 INTERACTIONS_FILE = JARVIS_HOME / "data" / "interactions.jsonl"
@@ -345,8 +345,8 @@ def check_daily_summary(cfg: dict, state: dict):
     try:
         # Memory chunk count
         try:
-            mem_r = requests.get("http://localhost:8181/memory/stats", timeout=5)
-            chunk_count = mem_r.json().get("total_chunks", "N/A") if mem_r.ok else "N/A"
+            mem_r = requests.get("http://localhost:8181/health", timeout=5)
+            chunk_count = mem_r.json().get("memory_chunks", "N/A") if mem_r.ok else "N/A"
         except Exception:
             chunk_count = "N/A"
 
