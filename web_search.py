@@ -43,6 +43,43 @@ _NEWS_TRIGGERS = re.compile(
     re.IGNORECASE,
 )
 
+_WEATHER_TRIGGERS = re.compile(
+    r"\b(weather|temperature|forecast|rain|sunny|cloudy|humidity|wind|storm|hot|cold)\b",
+    re.IGNORECASE,
+)
+_WEATHER_CITY = re.compile(
+    r"\b(?:weather|temperature|forecast)\b.*?\bin\b\s+([A-Za-z\s]{2,30}?)(?:\s+today|\s+now|\s*\?|$)",
+    re.IGNORECASE,
+)
+
+
+def is_weather_query(text: str) -> bool:
+    return bool(_WEATHER_TRIGGERS.search(text))
+
+
+def get_weather(query: str) -> str:
+    """Fetch weather from wttr.in — no JS, instant, no API key needed."""
+    # Extract city name from query
+    city = "auto"
+    m = _WEATHER_CITY.search(query)
+    if m:
+        city = m.group(1).strip().replace(" ", "+")
+    elif "dhaka" in query.lower():
+        city = "Dhaka"
+    elif "chittagong" in query.lower() or "chattogram" in query.lower():
+        city = "Chittagong"
+
+    try:
+        import requests as _req
+        # Format: location + condition + temp + humidity + wind
+        url = f"https://wttr.in/{city}?format=%l:+%C+%t,+humidity+%h,+wind+%w"
+        r = _req.get(url, timeout=8)
+        if r.status_code == 200 and r.text.strip():
+            return r.text.strip()
+    except Exception as exc:
+        log.warning("wttr.in failed: %s", exc)
+    return ""
+
 # Domains whose pages require heavy JS — scraping returns garbage or crashes.
 # We use the ddgs snippet for these instead of scraping.
 _SPA_DOMAINS = {
@@ -208,6 +245,12 @@ def web_answer(
     search → (scrape static pages) → AI synthesise → Telegram-ready reply.
     Returns (answer_text, sources).
     """
+    # Weather short-circuit — wttr.in is instant and always accurate
+    if is_weather_query(query):
+        weather = get_weather(query)
+        if weather:
+            return f"Sir, {weather}", []
+
     data = research(query, num_results=num_results)
     sources = data["sources"]
 

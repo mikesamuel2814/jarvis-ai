@@ -468,7 +468,10 @@ HELP_TEXT = (
     "/actions — List available actions\n"
     "/pending — Show pending approvals\n"
     "/task DESC — Delegate task to Claude Code (background, results here)\n"
-    "/exec CMD — Smart dispatch: detect action or plan + execute\n\n"
+    "/exec CMD — Smart dispatch: detect action or plan + execute\n"
+    "/web QUERY — Real-time web search + AI answer\n"
+    "/weather [city] — Current weather (wttr.in)\n"
+    "/browse URL — Open URL in headless browser\n\n"
     "After each response, tap 👍 or 👎 to train Jarvis.\n\n"
     "Actions (type naturally):\n"
     "  restart jarvis | restart bot | restart ollama\n"
@@ -1141,6 +1144,17 @@ def main():
         except Exception as e:
             await thinking_msg.edit_text(f"Web search error: {e}")
 
+    async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Quick weather via wttr.in. Usage: /weather [city]"""
+        city = " ".join(context.args).strip() if context.args else ""
+        query = f"weather in {city}" if city else "weather today"
+        from web_search import get_weather
+        result = get_weather(query)
+        if result:
+            await send(update, f"Sir, {result}")
+        else:
+            await send(update, "Could not fetch weather, Sir. Try /web weather in <city>")
+
     async def browse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Open a URL in headless Chrome, summarise + optional screenshot."""
         args = context.args or []
@@ -1462,6 +1476,7 @@ def main():
     app_bot.add_handler(CommandHandler("exec", exec_cmd))
     app_bot.add_handler(CommandHandler("web", web_cmd))
     app_bot.add_handler(CommandHandler("search", web_cmd))
+    app_bot.add_handler(CommandHandler("weather", weather_cmd))
     app_bot.add_handler(CommandHandler("browse", browse_cmd))
     app_bot.add_handler(CommandHandler("oc", oc_cmd))
     app_bot.add_handler(CommandHandler("openclaw", oc_cmd))
