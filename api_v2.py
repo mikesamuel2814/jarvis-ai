@@ -347,38 +347,65 @@ async def query(req: QueryRequest):
 
 @app.get("/sysinfo", dependencies=[Depends(require_api_key)])
 async def sysinfo():
-    """Live system info — CPU, RAM, GPU, disk. No LLM call."""
+    """Live system info — CPU, RAM, GPU, disk, uptime. No LLM call."""
+    import platform
     import psutil
+    import time
 
+    vm  = psutil.virtual_memory()
+    du  = psutil.disk_usage("/")
+    bt  = psutil.boot_time()
     info: dict[str, Any] = {
-        "cpu_percent": psutil.cpu_percent(interval=0.5),
-        "ram_percent": psutil.virtual_memory().percent,
-        "ram_used_gb": round(psutil.virtual_memory().used / 1e9, 1),
-        "ram_total_gb": round(psutil.virtual_memory().total / 1e9, 1),
-        "disk_percent": psutil.disk_usage("/").percent,
-        "disk_free_gb": round(psutil.disk_usage("/").free / 1e9, 1),
+        "cpu_percent":   round(psutil.cpu_percent(interval=0.5), 1),
+        "cpu_cores":     psutil.cpu_count(logical=False),
+        "cpu_threads":   psutil.cpu_count(logical=True),
+        "ram_percent":   round(vm.percent, 1),
+        "ram_used_gb":   round(vm.used / 1e9, 1),
+        "ram_total_gb":  round(vm.total / 1e9, 1),
+        "disk_percent":  round(du.percent, 1),
+        "disk_used_gb":  round(du.used / 1e9, 1),
+        "disk_total_gb": round(du.total / 1e9, 1),
+        "disk_free_gb":  round(du.free / 1e9, 1),
+        "uptime_hours":  round((time.time() - bt) / 3600, 1),
+        "hostname":      platform.node(),
     }
     try:
         import subprocess
         r = subprocess.run(
-            ["nvidia-smi", "--query-gpu=temperature.gpu,memory.used,memory.total",
+            ["nvidia-smi", "--query-gpu=temperature.gpu,memory.used,memory.total,utilization.gpu",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
             parts = r.stdout.strip().split(",")
-            info["gpu_temp_c"]       = int(parts[0].strip())
-            info["gpu_mem_used_mb"]  = int(parts[1].strip())
-            info["gpu_mem_total_mb"] = int(parts[2].strip())
+            info["gpu_temp_c"]        = int(parts[0].strip())
+            info["gpu_mem_used_mb"]   = int(parts[1].strip())
+            info["gpu_mem_total_mb"]  = int(parts[2].strip())
+            info["gpu_util_percent"]  = int(parts[3].strip())
     except Exception:
-        info["gpu"] = "unavailable"
+        pass
     return info
 
 
 @app.get("/stats", dependencies=[Depends(require_api_key)])
 async def stats():
     col = get_collection()
-    return {"total_chunks": col.count()}
+    count = col.count()
+    # Source-type breakdown from metadata
+    breakdown: dict[str, int] = {}
+    try:
+        res = col.get(include=["metadatas"])
+        for meta in (res.get("metadatas") or []):
+            src = (meta or {}).get("source_type", "unknown")
+            breakdown[src] = breakdown.get(src, 0) + 1
+    except Exception:
+        pass
+    return {
+        "total_chunks": count,
+        "memory_chunks": count,
+        "primary_model": "deepseek-r1:7b",
+        "source_type_breakdown": breakdown,
+    }
 
 
 @app.get("/metrics", dependencies=[Depends(require_api_key)])
