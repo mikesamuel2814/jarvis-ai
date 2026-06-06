@@ -319,6 +319,25 @@ def _bar(pct: float, width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _check_icon(key: str, val) -> str:
+    """Return ✅/⚠️/❌ for a selfcheck key-value pair."""
+    sv = str(val)
+    if sv in ("ok", "True", "true", "healthy"):
+        return "✅"
+    if sv in ("error", "False", "false", "down", "fail"):
+        return "❌"
+    # Numeric values are informational — use thresholds for known keys
+    try:
+        n = float(sv)
+        if "disk" in key:
+            return "✅" if n < 85 else ("⚠️" if n < 95 else "❌")
+        if "chunk" in key or "memory" in key:
+            return "✅" if n > 0 else "⚠️"
+        return "✅"  # any other positive number is fine
+    except ValueError:
+        return "⚠️"
+
+
 def get_stats() -> str:
     """Jarvis brain stats card."""
     try:
@@ -903,9 +922,7 @@ def main():
                     icon = "✅" if overall == "ok" else "⚠️"
                     lines = [f"{icon} *Jarvis Self-Check* — {overall.upper()}\n"]
                     for k, v in d.get("checks", {}).items():
-                        sv = str(v)
-                        ci = "✅" if sv in ("ok", "True") or sv.replace(".", "").isdigit() else "❌"
-                        lines.append(f"{ci} `{k}`: {v}")
+                        lines.append(f"{_check_icon(k, v)} `{k}`: {v}")
                     reply = "\n".join(lines)
                 except Exception as e:
                     reply = f"Self-check failed: {e}"
@@ -1294,8 +1311,7 @@ def main():
             emoji = "✅" if overall == "ok" else "⚠️"
             lines = [f"{emoji} *Jarvis Self-Check* — {overall.upper()}\n"]
             for k, v in d.get("checks", {}).items():
-                icon = "✅" if str(v) in ("ok", "True") else ("⚠️" if str(v).isdigit() else "❌")
-                lines.append(f"{icon} `{k}`: {v}")
+                lines.append(f"{_check_icon(k, v)} `{k}`: {v}")
             issues = d.get("issues", [])
             if issues:
                 lines.append("\n*Issues:*")
