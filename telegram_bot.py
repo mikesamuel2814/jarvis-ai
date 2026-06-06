@@ -42,6 +42,17 @@ log = logging.getLogger(__name__)
 MAX_HISTORY = 30  # messages per user kept on disk
 MAX_RESPONSE_CHARS = 8000  # hard cap — prevents duplicate spam from looping models
 
+# Kali tool names — plain-text messages that match these are redirected to /kali
+# rather than being dispatched through the NLP action detector (which would match
+# substrings like "ps" inside "wpscan" and run the wrong action).
+_KALI_TOOL_NAMES = {
+    "nmap", "nmap_quick", "nmap_full", "nmap_service", "nmap_ping", "nmap_vuln",
+    "nikto", "wpscan", "gobuster", "gobuster_dir", "ffuf", "sqlmap", "nuclei",
+    "whatweb", "masscan", "enum4linux", "smb_list", "hydra", "hashcat", "john",
+    "msf_resource", "metasploit", "searchsploit", "theharvester", "whois",
+    "dig", "host", "nslookup", "dirb", "dirbuster", "burpsuite", "zap",
+}
+
 # Per-user conversation history — loaded from disk on startup
 _histories: dict[int, deque] = {}
 
@@ -1925,6 +1936,28 @@ def main():
             except Exception:
                 plain = re.sub(r"<[^>]+>", "", result_html)
                 await update.message.reply_text(plain or "Done.")
+            return
+
+        # Intercept kali tool names typed as plain text → redirect to /kali usage
+        _KALI_TOOL_NAMES = {
+            "nmap", "nmap_quick", "nmap_full", "nmap_service", "nmap_ping", "nmap_vuln",
+            "nikto", "wpscan", "gobuster", "gobuster_dir", "ffuf", "sqlmap", "nuclei",
+            "whatweb", "masscan", "enum4linux", "smb_list", "hydra", "hashcat", "john",
+            "msf_resource", "metasploit", "searchsploit", "theharvester", "whois",
+            "dig", "host", "nslookup", "dirb", "burpsuite", "zaproxy",
+        }
+        from fmt import esc as _esc
+        _first_word = text.strip().lower().split()[0] if text.strip() else ""
+        if _first_word in _KALI_TOOL_NAMES:
+            _rest = text.strip().split()[1:] if len(text.strip().split()) > 1 else []
+            _example_target = _rest[0] if _rest else "scanme.nmap.org"
+            await send(
+                update,
+                f"💡 Looks like you want to run <b>{_esc(_first_word)}</b>.\n"
+                f"Usage: <code>/kali {_esc(_first_word)} &lt;target&gt; [opts]</code>\n"
+                f"Example: <code>/kali {_esc(_first_word)} {_esc(_example_target)}</code>",
+                already_html=True,
+            )
             return
 
         # Check if it's an action command first (fast path, no LLM needed)

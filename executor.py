@@ -223,6 +223,16 @@ import re as _re
 _CLAUDE_RESUME_RE = _re.compile(r"^claude\s+(--resume|-r)\s+([0-9a-f-]{36})", _re.I)
 _CLAUDE_CMD_RE    = _re.compile(r"^claude\s+(.+)", _re.I)
 
+# Known Kali security tool names — these must NEVER match as system actions.
+# "wpscan", "nmap", etc. are tool invocations, not process-list or other actions.
+_KALI_TOOL_NAMES = _re.compile(
+    r"\b(nmap|nikto|wpscan|gobuster|ffuf|sqlmap|nuclei|masscan|theharvester|"
+    r"whatweb|searchsploit|hydra|medusa|aircrack|dirb|dirbuster|feroxbuster|"
+    r"amass|subfinder|dnsx|httpx|crackmapexec|evil-winrm|metasploit|msfconsole|"
+    r"burpsuite|zaproxy|openvas|nessus|wireshark|tcpdump|netcat|nc)\b",
+    _re.I,
+)
+
 # Short Telegram aliases → action name (override NL_MAP when exact match)
 ACTION_ALIASES: dict[str, str] = {
     "gw logs":     "pm2_logs_gateway",
@@ -258,12 +268,15 @@ def detect_action(text: str) -> str | None:
     if tl in ACTIONS:
         return tl
 
-    # 3. Longest-phrase-wins across NL_MAP
+    # 3. Longest-phrase-wins across NL_MAP (whole-word match only — no substring)
+    import re as _re
     best_action: str | None = None
     best_len: int = 0
     for phrases, action in NL_MAP:
         for phrase in phrases:
-            if (phrase in tl or tl.startswith(phrase)) and len(phrase) > best_len:
+            # Require whole-word boundary so "ps" doesn't match inside "wpscan"
+            pattern = r"(?<!\w)" + _re.escape(phrase) + r"(?!\w)"
+            if _re.search(pattern, tl) and len(phrase) > best_len:
                 best_action = action
                 best_len = len(phrase)
     return best_action
