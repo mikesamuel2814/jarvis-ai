@@ -1,13 +1,19 @@
 """
 Jarvis Web Research Module
 
-Primary:  Headless Chrome via browser/agent.py (Google search + JS scraping)
-Fallback: DuckDuckGo API (ddgs) if browser fails
+Strategy:
+  Search  — DuckDuckGo (ddgs) PRIMARY, always reliable.
+            ddgs.news() for news/trending queries → richer articles.
+            Chrome optional for /browse <url> only (too unstable for search).
+  Scrape  — trafilatura for static pages.
+            Skip known JS-SPA domains (Binance, CoinDesk, CNBC…) — use
+            their ddgs snippet instead, which is already good enough.
 
 Public API:
   is_web_query(text)            → bool
-  search(query, num)            → list[{title, url, snippet}]
-  scrape(url)                   → clean text
+  is_news_query(text)           → bool
+  search(query, num)            → list[{title, url, snippet, date?}]
+  scrape(url)                   → clean text (or "" for SPA domains)
   research(query)               → {query, sources, context, elapsed}
   web_answer(query, use_cloud)  → (answer_text, sources)
 """
@@ -31,102 +37,153 @@ _WEB_TRIGGERS = [
 ]
 _WEB_PATTERN = re.compile("|".join(_WEB_TRIGGERS), re.IGNORECASE)
 
+_NEWS_TRIGGERS = re.compile(
+    r"\b(news|trending|latest|breaking|headlines|today|crypto market|market update"
+    r"|what.?s happening|what happened|recent events|current events)\b",
+    re.IGNORECASE,
+)
+
+# Domains whose pages require heavy JS — scraping returns garbage or crashes.
+# We use the ddgs snippet for these instead of scraping.
+_SPA_DOMAINS = {
+    "binance.com", "coinmarketcap.com", "coinbase.com", "kraken.com",
+    "cnbc.com", "bloomberg.com", "reuters.com", "wsj.com", "ft.com",
+    "coindesk.com", "cointelegraph.com", "investing.com", "tradingview.com",
+    "twitter.com", "x.com", "instagram.com", "facebook.com", "reddit.com",
+    "linkedin.com",
+}
+
 
 def is_web_query(text: str) -> bool:
     return bool(_WEB_PATTERN.search(text))
 
 
-# ── Search — browser first, ddgs fallback ────────────────────────────────
+def is_news_query(text: str) -> bool:
+    return bool(_NEWS_TRIGGERS.search(text))
+
+
+def _is_spa(url: str) -> bool:
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lstrip("www.")
+        return any(host == d or host.endswith("." + d) for d in _SPA_DOMAINS)
+    except Exception:
+        return False
+
+
+# ── Search — DuckDuckGo primary ───────────────────────────────────────────
 
 def search(query: str, num: int = 5) -> list[dict]:
-    """Google via headless Chrome. Falls back to DuckDuckGo API on error."""
-    try:
-        from browser.agent import google_search
-        results = google_search(query, num=num)
-        if results:
-            log.info("search('%s'): %d results via Chrome", query, len(results))
-            return results
-        log.warning("Chrome search returned 0 results, falling back to ddgs")
-    except Exception as exc:
-        log.warning("Chrome search failed (%s), falling back to ddgs", exc)
+    """
+    DuckDuckGo search (news search for news queries, text search otherwise).
+    Chrome is intentionally NOT used here — it crashes on SPA news/crypto sites.
+    Chrome is reserved for /browse <url> explicit navigation only.
+    """
+    # News queries → ddgs.news() gives dated articles with real content
+    if is_news_query(query):
+        try:
+            from ddgs import DDGS
+            with DDGS() as ddgs:
+                raw = list(ddgs.news(query, max_results=num))
+            results = [
+                {
+                    "title":   r.get("title", ""),
+                    "url":     r.get("url", r.get("link", "")),
+                    "snippet": r.get("body", r.get("excerpt", "")),
+                    "date":    r.get("date", ""),
+                    "source":  r.get("source", ""),
+                }
+                for r in raw
+            ]
+            if results:
+                log.info("search('%s'): %d news results via ddgs.news()", query, len(results))
+                return results
+        except Exception as exc:
+            log.warning("ddgs.news() failed (%s), falling back to ddgs.text()", exc)
 
-    # Fallback: ddgs
+    # General text search
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
             raw = list(ddgs.text(query, max_results=num))
-        return [
+        results = [
             {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
             for r in raw
         ]
-    except Exception as exc2:
-        log.error("ddgs fallback also failed: %s", exc2)
+        log.info("search('%s'): %d results via ddgs.text()", query, len(results))
+        return results
+    except Exception as exc:
+        log.error("ddgs.text() failed: %s", exc)
         return []
 
 
-# ── Scrape — browser for JS-heavy pages, trafilatura for static ───────────
+# ── Scrape — trafilatura for static pages, skip SPAs ─────────────────────
 
 def scrape(url: str, max_chars: int = 3500) -> str:
     """
-    Fetch full page content.
-    Uses headless Chrome so JS-rendered content (SPAs, paywalled previews) is captured.
+    Fetch page text via trafilatura (static HTML, no JS engine).
+    Returns "" for known SPA domains — caller should use ddgs snippet instead.
     """
-    try:
-        from browser.agent import open_url
-        text = open_url(url)
-        if text and len(text) > 100:
-            return text[:max_chars]
-    except Exception as exc:
-        log.debug("Browser scrape failed for %s: %s", url, exc)
+    if _is_spa(url):
+        log.debug("scrape: skipping SPA domain %s", url)
+        return ""
 
-    # Fallback: trafilatura (static HTML, no JS)
     try:
         import trafilatura
         downloaded = trafilatura.fetch_url(url)
-        text = trafilatura.extract(downloaded or "", include_tables=True, no_fallback=False)
-        return (text or "")[:max_chars]
-    except Exception as exc2:
-        log.debug("trafilatura fallback failed for %s: %s", url, exc2)
-        return ""
+        text = trafilatura.extract(
+            downloaded or "",
+            include_tables=True,
+            include_comments=False,
+            no_fallback=False,
+        )
+        if text and len(text) > 100:
+            log.debug("scrape('%s'): %d chars via trafilatura", url, len(text))
+            return text[:max_chars]
+    except Exception as exc:
+        log.debug("trafilatura scrape failed for %s: %s", url, exc)
+
+    return ""
 
 
 # ── Research pipeline ─────────────────────────────────────────────────────
 
-def research(query: str, num_results: int = 3, scrape_top: int = 2) -> dict:
+def research(query: str, num_results: int = 5, scrape_top: int = 2) -> dict:
     """
-    Full pipeline: search → scrape top pages → build AI context block.
+    search → (optionally scrape) → build AI context block.
     Returns {query, sources, context, elapsed}.
     """
     t0 = time.time()
-    try:
-        results = search(query, num=num_results)
-        sources = []
+    results = search(query, num=num_results)
+    sources = []
 
-        for i, r in enumerate(results):
-            full_text = ""
-            if i < scrape_top and r.get("url"):
-                full_text = scrape(r["url"])
-            sources.append({
-                "title":     r.get("title", ""),
-                "url":       r.get("url", ""),
-                "snippet":   r.get("snippet", ""),
-                "full_text": full_text,
-            })
-    finally:
-        # Close the headless browser after each research task → zero idle CPU.
-        # Per-task open/close is the right trade-off for an occasional-query bot;
-        # a resident chromium would otherwise sit warm burning CPU between calls.
-        try:
-            from browser.agent import quit_browser
-            quit_browser()
-        except Exception:
-            pass
+    for i, r in enumerate(results):
+        url = r.get("url", "")
+        # Scrape non-SPA pages to get full content; SPAs use snippet only
+        full_text = ""
+        if i < scrape_top and url and not _is_spa(url):
+            full_text = scrape(url)
+        sources.append({
+            "title":     r.get("title", ""),
+            "url":       url,
+            "snippet":   r.get("snippet", ""),
+            "date":      r.get("date", ""),
+            "source":    r.get("source", ""),
+            "full_text": full_text,
+        })
 
     ctx_parts = [f"Web search results for: {query}\n"]
     for i, s in enumerate(sources, 1):
-        ctx_parts.append(f"[{i}] {s['title']}")
+        header = f"[{i}] {s['title']}"
+        if s.get("date"):
+            header += f"  ({s['date'][:10]})"
+        if s.get("source"):
+            header += f"  — {s['source']}"
+        ctx_parts.append(header)
         ctx_parts.append(f"URL: {s['url']}")
-        ctx_parts.append(s["full_text"][:1500] if s["full_text"] else s["snippet"])
+        # Prefer full scraped text; fall back to snippet
+        body = s["full_text"] or s["snippet"]
+        ctx_parts.append(body[:2000] if body else "(no content)")
         ctx_parts.append("")
 
     elapsed = round(time.time() - t0, 1)
@@ -145,10 +202,10 @@ def research(query: str, num_results: int = 3, scrape_top: int = 2) -> dict:
 def web_answer(
     query: str,
     use_cloud: bool = True,
-    num_results: int = 3,
+    num_results: int = 5,
 ) -> tuple[str, list[dict]]:
     """
-    search → scrape → AI → short Telegram-ready reply.
+    search → (scrape static pages) → AI synthesise → Telegram-ready reply.
     Returns (answer_text, sources).
     """
     data = research(query, num_results=num_results)
@@ -158,16 +215,17 @@ def web_answer(
         return "Couldn't find anything online for that, Sir.", []
 
     system = (
-        "You are Jarvis, Mike's personal AI assistant.\n"
-        "Using ONLY the web search results below, answer the question.\n"
+        "You are Jarvis, Mike Samuel's personal AI assistant.\n"
+        "Using ONLY the web search results below, answer the question concisely.\n"
         "Rules:\n"
         "- Open with 'Sir,' exactly once\n"
-        "- 3-5 bullet points max, each under 15 words\n"
-        "- Lead with the single most important fact\n"
-        "- Include one source URL at the end if it adds value\n"
+        "- 4-6 bullet points, each under 20 words\n"
+        "- Lead with the single most important/surprising fact\n"
+        "- Include dates where available\n"
+        "- Include 1-2 source URLs at the end\n"
         "- Never say 'based on results' or 'according to'\n"
-        "- No fluff\n\n"
-        f"Web Context:\n{data['context'][:4500]}"
+        "- No fluff, no filler\n\n"
+        f"Web Context:\n{data['context'][:5000]}"
     )
 
     try:
@@ -175,20 +233,25 @@ def web_answer(
             import claude_client
             answer, _ = claude_client.get_client().query(system=system, user=query)
         else:
-            import re as _re
             import ollama as _ollama
             resp = _ollama.Client(host="http://localhost:11434").chat(
-                model="deepseek-r1:7b",
+                model="phi4-mini",
                 messages=[{"role": "user", "content": f"{system}\n\nQuestion: {query}"}],
-                options={"num_ctx": 4096, "num_predict": 512, "temperature": 0.3},
+                options={"num_ctx": 2048, "num_predict": 400, "temperature": 0.3},
             )
-            answer = _re.sub(r"<think>.*?</think>", "", resp["message"]["content"], flags=_re.DOTALL).strip()
+            raw = resp["message"]["content"]
+            answer = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     except Exception as exc:
         log.error("web_answer AI call failed: %s", exc)
+        # Graceful fallback — format the snippets ourselves
         lines = ["Here's what I found online, Sir:\n"]
-        for s in sources[:3]:
-            if s["snippet"]:
-                lines.append(f"• {s['snippet'][:200]}")
+        for s in sources[:4]:
+            body = s["snippet"] or s.get("full_text", "")
+            if body:
+                date = f" ({s['date'][:10]})" if s.get("date") else ""
+                lines.append(f"• {body[:180]}{date}")
+        if sources:
+            lines.append(f"\nSource: {sources[0]['url']}")
         answer = "\n".join(lines)
 
     return answer, sources
