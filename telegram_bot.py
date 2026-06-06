@@ -1072,6 +1072,24 @@ def main():
         except Exception as e:
             await send(update, f"Exec error: {e}")
 
+    async def web_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Real-time web search + AI analysis. Usage: /web <query>"""
+        query_text = " ".join(context.args).strip() if context.args else ""
+        if not query_text:
+            await send(update, "Usage: /web <query>\nExample: /web latest bitcoin price")
+            return
+        thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+        try:
+            from web_search import web_answer
+            answer, sources = web_answer(query_text, use_cloud=True)
+            # Append source links if not already in answer
+            if sources and "http" not in answer:
+                links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
+                answer = answer + "\n\n" + links
+            await thinking_msg.edit_text(_to_legacy_markdown(answer), parse_mode="Markdown")
+        except Exception as e:
+            await thinking_msg.edit_text(f"Web search error: {e}")
+
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
@@ -1161,6 +1179,27 @@ def main():
                     await send(update, run_action_via_api(action))
                 return
 
+        # Web search auto-detection — check before LLM call
+        from web_search import is_web_query, web_answer
+        if is_web_query(text):
+            thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+            try:
+                answer, sources = web_answer(text, use_cloud=True)
+                if sources and "http" not in answer:
+                    links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
+                    answer = answer + "\n\n" + links
+                add_to_history(uid, "user", text)
+                add_to_history(uid, "assistant", answer)
+                parts = split_message(answer)
+                for i, part in enumerate(parts):
+                    if i == 0:
+                        await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                    else:
+                        await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+            except Exception as e:
+                await thinking_msg.edit_text(f"Web search error: {e}")
+            return
+
         # LLM query — send a placeholder first so user sees immediate feedback
         _trigger_training_if_due()
         thinking_msg = await update.message.reply_text("⏳")
@@ -1210,6 +1249,8 @@ def main():
     app_bot.add_handler(CommandHandler("deny", deny_cmd))
     app_bot.add_handler(CommandHandler("task", task_cmd))
     app_bot.add_handler(CommandHandler("exec", exec_cmd))
+    app_bot.add_handler(CommandHandler("web", web_cmd))
+    app_bot.add_handler(CommandHandler("search", web_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
