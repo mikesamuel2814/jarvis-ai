@@ -859,7 +859,7 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         )
         d = resp.json()
         if d.get("status") == "pending":
-            return f"⏳ Approval required (ID: `{d['request_id']}`)\nReply /approve {d['request_id']} or /deny {d['request_id']}"
+            return f"⏳ PENDING:{d['request_id']}"
         output = d.get("output", "")
         ok = d.get("success", True)
         icon = "✅" if ok else "❌"
@@ -871,6 +871,23 @@ def run_action_via_api(action: str, arg: str = "") -> str:
     except Exception as e:
         log.warning("run_action_via_api error for %s: %s", action, e)
         return "⚠️ Sorry Sir, the action could not be completed. Check logs for details."
+
+
+async def _send_action_result(update, result: str, desc: str = "") -> None:
+    """Send action result — if pending, show Approve/Deny buttons instead of text instructions."""
+    if result.startswith("⏳ PENDING:"):
+        req_id = result.split(":", 1)[1].strip()
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        label = desc or "Action"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Approve",  callback_data=f"approve_{req_id}"),
+            InlineKeyboardButton("❌ Deny",     callback_data=f"deny_{req_id}"),
+        ]])
+        await send(update,
+            f"⚡ <b>Action request</b> — <code>{req_id}</code>\n{label}",
+            already_html=True, reply_markup=keyboard)
+    else:
+        await send(update, _to_html(result), already_html=True)
 
 
 def _auto_save_interaction(uid: int, query: str, response: str) -> None:
@@ -1255,7 +1272,18 @@ def main():
             # AUTO tier: execute immediately
             await query.message.chat.send_action("typing")
             result = run_action_via_api(action)
-            # run_action_via_api returns Markdown-style text (from _format_action_output)
+            if result.startswith("⏳ PENDING:"):
+                req_id = result.split(":", 1)[1].strip()
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup as IKM
+                kb = IKM([[
+                    InlineKeyboardButton("✅ Approve", callback_data=f"approve_{req_id}"),
+                    InlineKeyboardButton("❌ Deny",    callback_data=f"deny_{req_id}"),
+                ]])
+                await query.message.reply_text(
+                    f"⚡ <b>{esc(desc)}</b> — <code>{req_id}</code>",
+                    parse_mode="HTML", reply_markup=kb)
+                await query.answer()
+                return
             result_html = _to_html(result)
             try:
                 for part in split_message(result_html):
@@ -1738,10 +1766,8 @@ def main():
             await send(update, "⚠️ Sorry Sir, the scan could not be started. Check logs for details.")
             return
 
-        # run_action_via_api returns a Markdown-style string; convert to HTML for display.
-        # scope_warn was already sent in the "dispatching" message above — do NOT repeat it.
-        result_html = _to_html(result)
-        await send(update, result_html, already_html=True)
+        # Show Approve/Deny buttons for pending actions, plain output otherwise.
+        await _send_action_result(update, result, desc=ACTIONS.get(action, {}).get("desc", action))
 
     async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """List the last ~10 scan reports in ~/.jarvis/scans/."""
@@ -1969,13 +1995,7 @@ def main():
             arg = text.strip()
             await update.message.chat.send_action("typing")
             result = run_action_via_api(action, arg=arg)
-            result_html = _to_html(result)
-            try:
-                for part in split_message(result_html):
-                    await update.message.reply_text(part, parse_mode="HTML")
-            except Exception:
-                plain = re.sub(r"<[^>]+>", "", result_html)
-                await update.message.reply_text(plain or "Done.")
+            await _send_action_result(update, result)
             return
 
         # Intercept kali tool names typed as plain text → redirect to /kali usage hint.
@@ -2004,19 +2024,7 @@ def main():
             if tier == AUTO:
                 await update.message.chat.send_action("typing")
                 result_text = run_action_via_api(action)
-                if "Approval required" in result_text:
-                    m = re.search(r'ID: `([A-F0-9]{8})`', result_text)
-                    if m:
-                        rid = m.group(1)
-                        keyboard = InlineKeyboardMarkup([[
-                            InlineKeyboardButton("✅ Approve & Run", callback_data=f"approve_{rid}"),
-                            InlineKeyboardButton("❌ Deny",          callback_data=f"deny_{rid}"),
-                        ]])
-                        await send(update, _to_html(result_text), already_html=True, reply_markup=keyboard)
-                    else:
-                        await send(update, result_text)
-                else:
-                    await send(update, result_text)
+                await _send_action_result(update, result_text, desc=entry.get("desc", action))
                 return
             elif tier in (CONFIRM, APPROVE):
                 from fmt import bold, esc
