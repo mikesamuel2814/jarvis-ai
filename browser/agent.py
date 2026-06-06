@@ -104,6 +104,47 @@ def _is_crash(exc: Exception) -> bool:
     return any(marker in msg for marker in _CRASH_MARKERS)
 
 
+def _hard_kill_driver(driver) -> None:
+    """Tear down a (possibly crashed) driver WITHOUT leaking processes.
+
+    A plain driver.quit() is unreliable once the renderer has "tab crashed":
+    chromedriver can fail to reap its child chromium (gpu-process / utility /
+    renderer) siblings, leaving them spinning CPU forever. We observed 50
+    orphaned chromium procs accumulate this way. So: try a graceful quit, then
+    SIGKILL the whole chromedriver process group as a hard backstop.
+    """
+    if driver is None:
+        return
+    # Grab the chromedriver pid BEFORE quit() (quit clears service.process).
+    drv_pid = None
+    try:
+        proc = getattr(getattr(driver, "service", None), "process", None)
+        drv_pid = getattr(proc, "pid", None)
+    except Exception:
+        drv_pid = None
+
+    try:
+        driver.quit()
+    except Exception:
+        pass
+
+    # Backstop: kill the chromedriver's process group. chromedriver launches
+    # chromium in its own group, so this reaps every child renderer/gpu proc.
+    if drv_pid:
+        import signal
+        for killer in (
+            lambda: os.killpg(os.getpgid(drv_pid), signal.SIGKILL),
+            lambda: os.kill(drv_pid, signal.SIGKILL),
+        ):
+            try:
+                killer()
+                break
+            except (ProcessLookupError, PermissionError):
+                break
+            except Exception:
+                continue
+
+
 # ── Driver factory ────────────────────────────────────────────────────────
 
 def _make_driver():
@@ -188,11 +229,7 @@ class BrowserAgent:
         (possibly crashed) driver and spawns a fresh one."""
         if force or self._driver is None or not self._driver_ok():
             log.info("(Re)starting headless Chromium...")
-            try:
-                if self._driver:
-                    self._driver.quit()
-            except Exception:
-                pass
+            _hard_kill_driver(self._driver)   # reap old/crashed proc tree, no leak
             self._driver = None
             self._driver = _make_driver()
             log.info("Chromium ready.")
@@ -443,10 +480,7 @@ class BrowserAgent:
     def quit(self):
         with self._driver_lock:
             if self._driver:
-                try:
-                    self._driver.quit()
-                except Exception:
-                    pass
+                _hard_kill_driver(self._driver)   # reap full proc tree, no leak
                 self._driver = None
         BrowserAgent._instance = None
 
@@ -474,3 +508,17 @@ def screenshot() -> bytes:
 
 def quit_browser():
     BrowserAgent.get().quit()
+
+
+# Last-resort cleanup: if the host process exits without anyone calling quit()
+# (an unhandled exception in a caller, a killed worker, etc.), reap the
+# chromium process tree on the way out so we never leak browsers that spin CPU.
+import atexit
+
+
+@atexit.register
+def _reap_on_exit() -> None:
+    inst = BrowserAgent._instance
+    if inst is not None and inst._driver is not None:
+        _hard_kill_driver(inst._driver)
+        inst._driver = None
