@@ -1,7 +1,7 @@
 [Unit]
 Description=Jarvis 3.0 Telegram Bot
-After=network.target jarvis-v3.service
-Wants=jarvis-v3.service
+After=network.target jarvis.service
+Wants=jarvis.service
 
 [Service]
 Type=simple

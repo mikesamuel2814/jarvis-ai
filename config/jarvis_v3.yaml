@@ -2,7 +2,7 @@
 # Toggle components individually for safe rollout.
 
 v3:
-  enabled: false              # Master switch — set true when v3 is ready
+  enabled: true               # Master switch — v3 is now active
 
   # Core components
   tool_framework: true        # 127+ @jarvis_tool decorated tools
