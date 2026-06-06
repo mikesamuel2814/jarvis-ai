@@ -51,8 +51,9 @@ FALLBACK_MODEL = os.environ.get("JARVIS_AGENT_FALLBACK", "qwen2.5-coder:3b")
 # Core read-only actions always offered so simple asks never miss.
 _CORE_ACTIONS = ["disk", "memory", "gpu", "services", "pm2_status",
                  "nginx_status", "uptime", "project_status"]
-# Max actions shown to the planner (small prompt = stable 7b on 6GB VRAM).
-_MAX_CATALOG = 16
+# Max actions shown to the planner (small prompt = stable 7b on 6GB VRAM,
+# fewer distractors = more accurate selection).
+_MAX_CATALOG = 10
 OLLAMA_HOST = "http://localhost:11434"
 
 # Decision schema the planner must return every step.
@@ -76,16 +77,24 @@ _STOPWORDS = {"the", "a", "an", "is", "are", "on", "to", "of", "and", "in", "my"
               "what", "whats", "how", "can", "you", "please", "now", "this", "that"}
 
 
+# Verbs that define an action's INTENT — matching these is the strongest signal.
+_ACTION_VERBS = {"restart", "reboot", "stop", "start", "pull", "build", "deploy",
+                 "update", "install", "clear", "reindex", "write", "read", "list",
+                 "status", "logs", "deploy"}
+
+
 def _score_action(task_tokens: set[str], name: str, desc: str) -> int:
-    """Keyword-overlap score between the task and an action's name + description."""
+    """Keyword-overlap score between the task and an action's name + description.
+    Verb matches (restart/pull/build/…) are weighted highest so 'restart gateway'
+    beats 'git pull gateway'."""
     name_tokens = set(re.split(r"[_\s]+", name.lower()))
     desc_tokens = set(re.findall(r"[a-z0-9]+", desc.lower()))
     score = 0
     for t in task_tokens:
         if t in name_tokens:
-            score += 3            # name match is strongest signal
+            score += 5 if t in _ACTION_VERBS else 3   # verb-in-name is decisive
         elif t in desc_tokens:
-            score += 1
+            score += 2 if t in _ACTION_VERBS else 1
     return score
 
 
@@ -114,30 +123,27 @@ def _tool_catalog(allow_destructive: bool, task: str = "") -> tuple[str, set[str
             score += 1  # gentle bias so basics are always available
         candidates.append((score, name, entry["desc"], tier))
 
-    # Rank by relevance; keep top N, but always keep core read-only actions.
+    # Rank by relevance; keep top N (most relevant first), always keep core.
     candidates.sort(key=lambda c: -c[0])
-    chosen: dict[str, tuple] = {}
+    chosen: list[tuple] = []          # preserve relevance order
+    seen: set[str] = set()
     for score, name, desc, tier in candidates:
         if len(chosen) >= _MAX_CATALOG:
             break
-        chosen[name] = (name, desc, tier)
+        chosen.append((name, desc, tier))
+        seen.add(name)
     for core in _CORE_ACTIONS:
-        if core in ACTIONS and core not in chosen:
-            chosen[core] = (core, ACTIONS[core]["desc"], ACTIONS[core]["tier"])
+        if core in ACTIONS and core not in seen:
+            chosen.append((core, ACTIONS[core]["desc"], ACTIONS[core]["tier"]))
+            seen.add(core)
 
-    auto_lines, other_lines, allowed = [], [], set()
-    for name, desc, tier in chosen.values():
+    # Display in relevance order (best match first — models bias toward the top).
+    # No tier tags: the autonomy gate enforces tiers; tags only confuse the model.
+    lines = ["Actions (most relevant first):"]
+    allowed = set()
+    for name, desc, tier in chosen:
         allowed.add(name)
-        if tier == AUTO:
-            auto_lines.append(f"  {name} — {desc}")
-        else:
-            other_lines.append(f"  {name} [{tier}] — {desc}")
-
-    lines = ["READ-ONLY actions (safe, run freely):"]
-    lines.extend(sorted(auto_lines))
-    if other_lines:
-        lines.append("\nSTATE-CHANGING actions (need approval unless pre-approved):")
-        lines.extend(sorted(other_lines))
+        lines.append(f"  {name} — {desc}")
     return "\n".join(lines), allowed
 
 
@@ -230,12 +236,16 @@ Available actions:
 
 Rules:
 - Each step, return JSON: {{"thought": "...", "done": false, "action": "name", "arg": "optional"}}
-- Run read-only actions freely to gather facts before concluding.
+- If the user gives a DIRECT COMMAND to perform an action (e.g. "restart X",
+  "deploy Y", "update Z"), select that exact action immediately — do NOT gather
+  facts first. The first action listed is usually the right match.
+- If the user asks a QUESTION or wants a diagnosis, run read-only actions to
+  gather facts, then conclude.
 - 'arg' is only for actions that take one (file paths, shell args). Omit otherwise.
 - When you have enough to answer, return {{"thought":"...","done":true,"answer":"Sir, ..."}}
 - The answer must start with "Sir," be concise, professional, and factual.
-- Never invent action names. Never repeat an action that already succeeded.
-- If a task needs a state-changing action you cannot run, explain what needs approval."""
+- Never invent action names. Pick the action whose description best matches the
+  user's request. Never repeat an action that already succeeded."""
 
 
 def run_agent(task: str, max_steps: int = 6, allow_destructive: bool = False) -> dict:
