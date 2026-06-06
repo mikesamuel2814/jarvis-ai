@@ -858,7 +858,7 @@ def run_action_via_api(action: str, arg: str = "") -> str:
     try:
         resp = requests.post(
             f"{API_BASE}/action",
-            json={"action": action, "arg": arg},
+            json={"action": action, "arg": arg, "silent": True},
             headers=_ah(),
             timeout=300,
         )
@@ -878,19 +878,21 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         return "⚠️ Sorry Sir, the action could not be completed. Check logs for details."
 
 
-async def _send_action_result(update, result: str, desc: str = "") -> None:
-    """Send action result — if pending, show Approve/Deny buttons instead of text instructions."""
+async def _send_action_result(update, result: str, desc: str = "", arg: str = "") -> None:
+    """Send action result — if pending, show Approve/Deny inline buttons."""
     if result.startswith("⏳ PENDING:"):
         req_id = result.split(":", 1)[1].strip()
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from fmt import code, esc
         label = desc or "Action"
+        body = f"⚡ <b>Action request</b> — <code>{req_id}</code>\n{esc(label)}"
+        if arg:
+            body += f"\nArg: <code>{esc(arg)}</code>"
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Approve",  callback_data=f"approve_{req_id}"),
             InlineKeyboardButton("❌ Deny",     callback_data=f"deny_{req_id}"),
         ]])
-        await send(update,
-            f"⚡ <b>Action request</b> — <code>{req_id}</code>\n{label}",
-            already_html=True, reply_markup=keyboard)
+        await send(update, body, already_html=True, reply_markup=keyboard)
     else:
         await send(update, _to_html(result), already_html=True)
 
@@ -1215,13 +1217,17 @@ def main():
             elif cmd == "actions":
                 from executor import ACTIONS, AUTO, CONFIRM, APPROVE
                 from fmt import bold, code, esc
-                auto = [k for k, v in ACTIONS.items() if v["tier"] == AUTO]
-                conf = [k for k, v in ACTIONS.items() if v["tier"] == CONFIRM]
-                appr = [k for k, v in ACTIONS.items() if v["tier"] == APPROVE]
+                auto = [k for k, v in ACTIONS.items() if v["tier"] == AUTO  and not k.startswith("kali_")]
+                conf = [k for k, v in ACTIONS.items() if v["tier"] == CONFIRM and not k.startswith("kali_")]
+                appr = [k for k, v in ACTIONS.items() if v["tier"] == APPROVE and not k.startswith("kali_")]
+                kali_a = [k for k, v in ACTIONS.items() if k.startswith("kali_") and v["tier"] == AUTO]
+                kali_p = [k for k, v in ACTIONS.items() if k.startswith("kali_") and v["tier"] == APPROVE]
                 reply = (f"{bold(f'Actions ({len(ACTIONS)} total)')}\n\n"
                          f"{bold('⚡ AUTO')} ({len(auto)})\n" + "  ".join(code(a) for a in auto) + "\n\n"
                          f"{bold('🔔 CONFIRM')} ({len(conf)})\n" + "  ".join(code(a) for a in conf) + "\n\n"
-                         f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(a) for a in appr))
+                         f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(a) for a in appr) + "\n\n"
+                         f"{bold('🛡 Kali Tools')} — ⚡ {len(kali_a)} passive  🔐 {len(kali_p)} active/exploit\n"
+                         f"  Use {code('/kali')} for full tool catalogue.")
             elif cmd == "pending":
                 try:
                     import json as _j, pathlib as _p
@@ -1273,9 +1279,10 @@ def main():
             # CONFIRM/APPROVE tier: show inline confirmation keyboard
             if tier in (CONFIRM, APPROVE):
                 tier_icon = "🔔" if tier == CONFIRM else "🔐"
+                btn_label = "✅ Confirm" if tier == CONFIRM else "✅ Approve"
                 keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton(f"✅ Yes, {desc[:30]}", callback_data=f"confirm_act_{action}"),
-                    InlineKeyboardButton("❌ Cancel", callback_data="cancel_act"),
+                    InlineKeyboardButton(btn_label,   callback_data=f"confirm_act_{action}"),
+                    InlineKeyboardButton("❌ Cancel",  callback_data="cancel_act"),
                 ]])
                 await query.message.reply_text(
                     f"{tier_icon} <b>{esc(desc)}</b>\n\nSir, confirm this action?",
@@ -1783,7 +1790,7 @@ def main():
             return
 
         # Show Approve/Deny buttons for pending actions, plain output otherwise.
-        await _send_action_result(update, result, desc=ACTIONS.get(action, {}).get("desc", action))
+        await _send_action_result(update, result, desc=ACTIONS.get(action, {}).get("desc", action), arg=arg)
 
     async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """List the last ~10 scan reports in ~/.jarvis/scans/."""
@@ -2044,24 +2051,27 @@ def main():
                 return
             elif tier in (CONFIRM, APPROVE):
                 from fmt import bold, esc
-                tier_label = "⚡" if tier == CONFIRM else "🔐"
-                msg = f"{tier_label} {bold(esc(entry['desc']))}\n\nConfirm?"
+                tier_label = "🔔" if tier == CONFIRM else "🔐"
                 try:
                     resp = requests.post(
                         f"{API_BASE}/action",
-                        json={"action": action, "arg": ""},
+                        json={"action": action, "arg": "", "silent": True},
                         headers=_ah(),
-                        timeout=10,
+                        timeout=30,
                     )
                     d = resp.json()
                     req_id = d.get("request_id", "")
+                    body = (
+                        f"{tier_label} <b>Action request</b> — <code>{req_id}</code>\n"
+                        f"{esc(entry['desc'])}"
+                    )
                     keyboard = InlineKeyboardMarkup([
                         [
-                            InlineKeyboardButton("✅ Approve & Run", callback_data=f"approve_{req_id}"),
-                            InlineKeyboardButton("❌ Deny",          callback_data=f"deny_{req_id}"),
+                            InlineKeyboardButton("✅ Approve",  callback_data=f"approve_{req_id}"),
+                            InlineKeyboardButton("❌ Deny",     callback_data=f"deny_{req_id}"),
                         ]
                     ])
-                    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="HTML")
+                    await send(update, body, already_html=True, reply_markup=keyboard)
                 except Exception:
                     await send(update, run_action_via_api(action))
                 return

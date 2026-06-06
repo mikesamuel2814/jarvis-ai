@@ -896,6 +896,7 @@ class ActionRequest(BaseModel):
     action: str
     arg: Optional[str] = ""
     skip_permission: Optional[bool] = False
+    silent: Optional[bool] = False  # True = caller handles notification (e.g. telegram_bot inline buttons)
 
 
 @app.post("/action")
@@ -926,7 +927,8 @@ def execute_action(req: ActionRequest):
         + (f"\nArg: `{req.arg}`" if req.arg else "")
         + f"\n\nReply with:\n`/approve {perm_req['id']}` to run\n`/deny {perm_req['id']}` to cancel"
     )
-    _send_telegram_direct(msg)
+    if not req.silent:
+        _send_telegram_direct(msg)
     return {"status": "pending", "request_id": perm_req["id"], "tier": tier}
 
 
