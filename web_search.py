@@ -129,6 +129,7 @@ def search(query: str, num: int = 5) -> list[dict]:
                     "snippet": r.get("body", r.get("excerpt", "")),
                     "date":    r.get("date", ""),
                     "source":  r.get("source", ""),
+                    "image":   r.get("image", ""),
                 }
                 for r in raw
             ]
@@ -206,6 +207,7 @@ def research(query: str, num_results: int = 5, scrape_top: int = 2) -> dict:
             "snippet":   r.get("snippet", ""),
             "date":      r.get("date", ""),
             "source":    r.get("source", ""),
+            "image":     r.get("image", ""),
             "full_text": full_text,
         })
 
@@ -218,6 +220,8 @@ def research(query: str, num_results: int = 5, scrape_top: int = 2) -> dict:
             header += f"  — {s['source']}"
         ctx_parts.append(header)
         ctx_parts.append(f"URL: {s['url']}")
+        if s.get("image"):
+            ctx_parts.append(f"Image: {s['image']}")
         # Prefer full scraped text; fall back to snippet
         body = s["full_text"] or s["snippet"]
         ctx_parts.append(body[:2000] if body else "(no content)")
@@ -287,14 +291,16 @@ def web_answer(
     except Exception as exc:
         log.error("web_answer AI call failed: %s", exc)
         # Graceful fallback — format the snippets ourselves
-        lines = ["Here's what I found online, Sir:\n"]
+        lines = ["Sir, here's what I found:\n"]
         for s in sources[:4]:
-            body = s["snippet"] or s.get("full_text", "")
-            if body:
-                date = f" ({s['date'][:10]})" if s.get("date") else ""
-                lines.append(f"• {body[:180]}{date}")
-        if sources:
-            lines.append(f"\nSource: {sources[0]['url']}")
+            title = s.get("title", "").strip()
+            snippet = (s.get("snippet") or s.get("full_text", "")).strip()
+            date = f" ({s['date'][:10]})" if s.get("date") else ""
+            url = s.get("url", "")
+            if title or snippet:
+                lines.append(f"• {title}{date} — {snippet[:160]}")
+                if url:
+                    lines.append(f"  {url}")
         answer = "\n".join(lines)
 
     return answer, sources

@@ -240,8 +240,15 @@ def _is_voice_on(uid: int) -> bool:
     return _voice_mode.get(uid, False)
 
 
+def _to_html(text: str) -> str:
+    """Convert Markdown-flavoured text to Telegram HTML."""
+    import sys as _sys
+    _sys.path.insert(0, str(JARVIS_HOME))
+    from fmt import strip_markdown
+    return strip_markdown(text)
+
+
 def _to_legacy_markdown(text: str) -> str:
-    # Telegram legacy Markdown uses single * for bold; **bold** 400s.
     return text.replace("**", "*").replace("__", "_")
 
 
@@ -339,44 +346,53 @@ def _check_icon(key: str, val) -> str:
 
 
 def get_stats() -> str:
-    """Jarvis brain stats card."""
+    """Jarvis brain stats card (HTML)."""
     try:
+        from fmt import bold, code, progress_bar, esc
         resp = requests.get(f"{API_BASE}/stats", headers=_ah(), timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        chunks = d.get("total_chunks", d.get("memory_chunks", 0))
-        model = d.get("primary_model", d.get("model", "deepseek-r1:7b"))
+        chunks    = d.get("total_chunks", d.get("memory_chunks", 0))
+        model     = d.get("primary_model", d.get("model", "deepseek-r1:7b"))
         breakdown = d.get("source_type_breakdown", {})
-        top = sorted(breakdown.items(), key=lambda x: -x[1])
-        src_lines = "  ".join(f"`{k}:{v}`" for k, v in top)
+        top       = sorted(breakdown.items(), key=lambda x: -x[1])
+        src_lines = "  ".join(f"<code>{esc(k)}:{v}</code>" for k, v in top)
         return (
-            "*Jarvis Brain*\n"
-            f"Model: `{model}`\n"
-            f"Memory: `{chunks:,}` chunks\n"
-            f"Sources: {src_lines}"
+            f"🧠 {bold('Jarvis Brain')}\n\n"
+            f"Model: {code(model)}\n"
+            f"Memory: {code(f'{chunks:,}')} chunks\n\n"
+            f"Sources:\n{src_lines}"
         )
     except Exception as e:
         return f"Stats unavailable: {e}"
 
 
 def get_health() -> str:
+    """Jarvis health card (HTML)."""
     try:
+        from fmt import bold, code, esc
         resp = requests.get(f"{API_BASE}/health", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        ok = d.get("status") in ("healthy", "ok")
+        ok   = d.get("status") in ("healthy", "ok")
         icon = "✅" if ok else "⚠️"
+        ollama = d.get("ollama", "?")
+        chroma = d.get("chromadb", d.get("memory", "?"))
+        chunks = d.get("memory_chunks", "")
+        mem_str = f"  {code(f'{chunks:,} chunks')}" if chunks else ""
         return (
-            f"{icon} *Jarvis* — {d.get('status', 'unknown')}\n"
-            f"Ollama: `{d.get('ollama')}` | ChromaDB: `{d.get('chromadb', d.get('memory', '?'))}`"
+            f"{icon} {bold('Jarvis')} — {code(d.get('status', 'unknown'))}\n\n"
+            f"{'✅' if ollama=='ok' else '❌'} Ollama: {code(ollama)}\n"
+            f"{'✅' if chroma=='ok' else '❌'} ChromaDB: {code(chroma)}{mem_str}"
         )
     except Exception as e:
         return f"Health check failed: {e}"
 
 
 def get_sysinfo() -> str:
-    """Full system stats card — minimal, one screen."""
+    """Full system stats card (HTML)."""
     try:
+        from fmt import bold, code, italic, progress_bar, esc
         si = requests.get(f"{API_BASE}/sysinfo", headers=_ah(), timeout=15).json()
         st = requests.get(f"{API_BASE}/stats",   headers=_ah(), timeout=10).json()
         hl = requests.get(f"{API_BASE}/health",                 timeout=10).json()
@@ -387,10 +403,10 @@ def get_sysinfo() -> str:
         chunks    = st.get("total_chunks", st.get("memory_chunks", 0))
         model     = st.get("primary_model", "deepseek-r1:7b")
         breakdown = st.get("source_type_breakdown", {})
-        top2      = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
-        src       = "  ".join(f"`{k}:{v}`" for k, v in top2)
+        top2      = sorted(breakdown.items(), key=lambda x: -x[1])[:3]
+        src       = "  ".join(f"<code>{esc(k)}:{v}</code>" for k, v in top2)
 
-        cpu_pct  = si.get("cpu_percent", "?")
+        cpu_pct  = si.get("cpu_percent", 0)
         cores    = si.get("cpu_cores", "?")
         threads  = si.get("cpu_threads", "?")
         ram_used = si.get("ram_used_gb", "?")
@@ -407,34 +423,27 @@ def get_sysinfo() -> str:
         hostname = si.get("hostname", "kali")
 
         lines = [
-            f"*Jarvis Stats* {svc_icon}",
+            f"{svc_icon} {bold('Jarvis System Status')}",
             "",
-            "*Brain*",
-            f"  Model: `{model}`  Memory: `{chunks:,}` chunks",
+            f"🧠 {bold('Brain')}",
+            f"  Model: {code(model)}",
+            f"  Memory: {code(f'{chunks:,}')} chunks",
+            f"  {src}" if src else "",
+            "",
+            f"🖥 {bold('Hardware')}",
+            f"  CPU  {code(f'{cpu_pct}%')} {progress_bar(float(cpu_pct))}  {code(f'{cores}c/{threads}t')}",
+            f"  RAM  {code(f'{ram_used}/{ram_tot} GB')} {progress_bar(float(ram_pct))}",
+            f"  Disk {code(f'{d_used}/{d_tot} GB')} {progress_bar(float(d_pct))}",
         ]
-        if src:
-            lines.append(f"  {src}")
-        lines += ["", "*Hardware*"]
-
-        lines.append(
-            f"  CPU `{cpu_pct}%` {_bar(float(cpu_pct) if str(cpu_pct) != '?' else 0)}  "
-            f"`{cores}c/{threads}t`"
-        )
-        lines.append(
-            f"  RAM `{ram_used}/{ram_tot} GB` {_bar(float(ram_pct))}"
-        )
-        lines.append(
-            f"  Disk `{d_used}/{d_tot} GB` {_bar(float(d_pct))}"
-        )
         if gpu_util is not None:
             vram_pct = round(gpu_used / max(gpu_tot, 1) * 100) if gpu_used and gpu_tot else 0
             lines.append(
-                f"  GPU `{gpu_util}%` {_bar(gpu_util)}  "
-                f"VRAM `{gpu_used}/{gpu_tot} MB` {_bar(vram_pct)}  `{gpu_temp}°C`"
+                f"  GPU  {code(f'{gpu_util}%')} {progress_bar(gpu_util)}  "
+                f"VRAM {code(f'{gpu_used}/{gpu_tot} MB')} {progress_bar(vram_pct)}  {code(f'{gpu_temp}°C')}"
             )
 
-        lines += ["", f"_Uptime {uptime}h — {hostname}_"]
-        return "\n".join(lines)
+        lines += ["", italic(f"Uptime {uptime}h — {hostname}")]
+        return "\n".join(l for l in lines if l is not None)
     except Exception as e:
         return f"Could not fetch stats: {e}"
 
@@ -450,45 +459,44 @@ def trigger_index() -> str:
 
 
 HELP_TEXT = (
-    "Jarvis Commands:\n"
-    "/start — Welcome\n"
-    "/help — This help\n"
-    "/stats — Memory stats\n"
-    "/sysinfo — Live system info\n"
-    "/health — Service health\n"
-    "/index — Re-index your work\n"
-    "/clear — Clear chat history\n"
-    "/remember KEY VALUE — Save a personal fact\n"
-    "/voice on|off — Toggle voice audio responses\n"
-    "/correct TEXT — Correct Jarvis's last answer (trains brain)\n"
-    "/learn — Run brain training now\n"
-    "/selfcheck — Full system self-check + health report\n"
-    "/approve ID — Approve a pending action\n"
-    "/deny ID — Deny a pending action\n"
+    "🤖 <b>Jarvis Commands</b>\n\n"
+    "<b>📊 Status</b>\n"
+    "/stats — Brain &amp; memory stats\n"
+    "/sysinfo — Live CPU/RAM/GPU/Disk\n"
+    "/health — Service health check\n"
+    "/selfcheck — Full system self-check\n\n"
+    "<b>🔍 Web &amp; Research</b>\n"
+    "/web <i>query</i> — Real-time web search + AI answer\n"
+    "/weather <i>[city]</i> — Current weather\n"
+    "/browse <i>url</i> — Open URL in headless browser\n\n"
+    "<b>⚡ Actions</b>\n"
+    "/exec <i>cmd</i> — Smart dispatch (plan + execute)\n"
+    "/task <i>desc</i> — Delegate to Claude Code (async)\n"
     "/actions — List available actions\n"
     "/pending — Show pending approvals\n"
-    "/task DESC — Delegate task to Claude Code (background, results here)\n"
-    "/exec CMD — Smart dispatch: detect action or plan + execute\n"
-    "/web QUERY — Real-time web search + AI answer\n"
-    "/weather [city] — Current weather (wttr.in)\n"
-    "/browse URL — Open URL in headless browser\n\n"
-    "After each response, tap 👍 or 👎 to train Jarvis.\n\n"
-    "Actions (type naturally):\n"
-    "  restart jarvis | restart bot | restart ollama\n"
-    "  show processes | disk space | memory usage\n"
-    "  gpu status | show logs | tailscale status\n\n"
-    "Or just chat — Jarvis remembers your conversation."
+    "/approve <i>ID</i> — Approve a pending action\n"
+    "/deny <i>ID</i> — Deny a pending action\n\n"
+    "<b>🛡 Security (Kali)</b>\n"
+    "/kali <i>tool target</i> — Run pentest tool\n"
+    "/scans — List recent scan reports\n\n"
+    "<b>🧠 Learning</b>\n"
+    "/correct <i>text</i> — Correct last answer (trains brain)\n"
+    "/learn — Run brain training now\n"
+    "/index — Re-index your work\n\n"
+    "<b>⚙️ Settings</b>\n"
+    "/remember <i>key value</i> — Save a personal fact\n"
+    "/voice on|off — Toggle voice audio responses\n"
+    "/clear — Clear chat history\n\n"
+    "<i>Tap 👍 or 👎 after each reply to train Jarvis.</i>\n"
+    "<i>Or just chat — Jarvis remembers your conversation.</i>"
 )
 
 
 def split_message(text: str, limit: int = 4000) -> list[str]:
-    if len(text) <= limit:
-        return [text]
-    parts = []
-    while text:
-        parts.append(text[:limit])
-        text = text[limit:]
-    return parts
+    import sys as _sys
+    _sys.path.insert(0, str(JARVIS_HOME))
+    from fmt import split_smart
+    return split_smart(text, limit=limit)
 
 
 def _trigger_training_if_due():
@@ -776,9 +784,18 @@ def main():
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(_j.dumps({"chat_id": uid}))
 
-    async def send(update: Update, text: str):
-        for part in split_message(text):
-            await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+    async def send(update: Update, text: str, parse_mode: str = "HTML", reply_markup=None):
+        """Send text with HTML formatting by default. Auto-converts Markdown."""
+        if parse_mode == "HTML":
+            converted = _to_html(text)
+        else:
+            converted = _to_legacy_markdown(text)
+        parts = split_message(converted)
+        for i, part in enumerate(parts):
+            kw = {}
+            if reply_markup and i == len(parts) - 1:
+                kw["reply_markup"] = reply_markup
+            await update.message.reply_text(part, parse_mode=parse_mode, **kw)
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -829,12 +846,14 @@ def main():
 
     async def actions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from executor import ACTIONS, AUTO, CONFIRM, APPROVE
-        lines = ["Available actions:\n"]
-        for tier, label in [(AUTO, "⚡ Auto"), (CONFIRM, "🔔 Confirm"), (APPROVE, "🔐 Approve")]:
-            items = [f"  `{k}` — {v['desc']}" for k, v in ACTIONS.items() if v["tier"] == tier]
+        from fmt import bold, code, esc
+        lines = [f"⚡ {bold('Available Actions')}\n"]
+        for tier, label, icon in [(AUTO, "Auto", "⚡"), (CONFIRM, "Confirm", "🔔"), (APPROVE, "Approve", "🔐")]:
+            items = [f"  {icon} {code(esc(k))} — {esc(v['desc'])}" for k, v in ACTIONS.items() if v["tier"] == tier]
             if items:
-                lines.append(f"*{label}*")
+                lines.append(bold(f"{icon} {label}"))
                 lines.extend(items)
+                lines.append("")
         await send(update, "\n".join(lines))
 
     async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -849,9 +868,10 @@ def main():
         await send(update, "\n".join(lines))
 
     async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from fmt import bold, pre, esc
         args = context.args
         if not args:
-            await send(update, "Usage: /approve REQUEST_ID")
+            await send(update, "Usage: /approve <i>REQUEST_ID</i>")
             return
         req_id = args[0].upper()
         await update.message.chat.send_action("typing")
@@ -861,10 +881,13 @@ def main():
             output = d.get("output", "")
             ok = d.get("success", True)
             icon = "✅" if ok else "❌"
-            reply = f"{icon} Executed\n```\n{output[:2000]}\n```" if output else f"{icon} Done."
+            if output:
+                reply = f"{icon} {bold('Executed')}\n\n{pre(esc(output[:2000]))}"
+            else:
+                reply = f"{icon} {bold('Done.')}"
             await send(update, reply)
         except Exception as e:
-            await send(update, f"Error: {e}")
+            await send(update, f"Error: {esc(str(e))}")
 
     async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         args = context.args
@@ -1087,11 +1110,15 @@ def main():
 
     async def task_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Delegate a task to Claude Code (background, results via Telegram)."""
+        from fmt import bold, italic, code, esc
         task = " ".join(context.args).strip() if context.args else ""
         if not task:
-            await send(update, "Usage: /task <description>\nExample: /task fix the typo in gateway-admin index.js line 42")
+            await send(update,
+                f"Usage: /task <i>description</i>\n"
+                f"Example: <code>/task fix the typo in gateway-admin index.js line 42</code>"
+            )
             return
-        await send(update, f"🤖 Queuing Claude Code task:\n`{task}`\n\nApproval required to run.")
+        await send(update, f"🤖 Queuing Claude Code task:\n{code(esc(task[:200]))}\n\nApproval required to run.")
         try:
             resp = requests.post(f"{API_BASE}/action", json={"action": "claude_task", "arg": task}, headers=_ah(), timeout=10)
             d = resp.json()
@@ -1102,14 +1129,16 @@ def main():
                     InlineKeyboardButton("❌ Cancel",   callback_data=f"deny_{req_id}"),
                 ]])
                 await update.message.reply_text(
-                    f"🔐 *Claude Task* (ID: `{req_id}`)\n_{task[:200]}_\n\nResults sent here when complete.",
+                    f"🔐 {bold('Claude Task')} <code>{req_id}</code>\n\n"
+                    f"{italic(esc(task[:300]))}\n\n"
+                    f"<i>Results will be sent here when complete.</i>",
                     reply_markup=keyboard,
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                 )
             else:
                 await send(update, d.get("output", "Task queued."))
         except Exception as e:
-            await send(update, f"Error queuing task: {e}")
+            await send(update, f"Error queuing task: {esc(str(e))}")
 
     async def exec_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Smart action dispatch — detect action or plan via claude-plan."""
@@ -1129,18 +1158,68 @@ def main():
 
     async def web_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Real-time web search + AI analysis. Usage: /web <query>"""
+        from fmt import bold, italic, link, code, esc, card as fmt_card, split_smart
         query_text = " ".join(context.args).strip() if context.args else ""
         if not query_text:
-            await send(update, "Usage: /web <query>\nExample: /web latest bitcoin price")
+            await send(update,
+                f"Usage: /web <i>query</i>\n"
+                f"Examples:\n"
+                f"  /web latest crypto market news\n"
+                f"  /web bitcoin price today\n"
+                f"  /web kali linux 2025 release"
+            )
             return
-        thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+        thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir…")
         try:
             from web_search import web_answer
             answer, sources = web_answer(query_text, use_cloud=True)
-            if sources and "http" not in answer:
-                links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
-                answer = answer + "\n\n" + links
-            await thinking_msg.edit_text(_to_legacy_markdown(answer), parse_mode="Markdown")
+
+            # ── 1. AI Summary ──────────────────────────────────────────────
+            summary_html = _to_html(answer)
+            await thinking_msg.edit_text(summary_html, parse_mode="HTML")
+
+            # ── 2. Source cards (up to 5) ──────────────────────────────────
+            if sources:
+                cards_html = f"🔗 {bold('Sources')}\n\n"
+                for i, s in enumerate(sources[:5], 1):
+                    title   = s.get("title", f"Source {i}")
+                    url     = s.get("url", "")
+                    snippet = s.get("snippet", "") or s.get("full_text", "")
+                    date    = s.get("date", "")[:10] if s.get("date") else ""
+                    source  = s.get("source", "")
+                    meta    = "  ".join(filter(None, [date, source]))
+
+                    if url:
+                        header = f"{bold(link(esc(title[:80]), url))}"
+                    else:
+                        header = bold(esc(title[:80]))
+
+                    card_lines = [header]
+                    if meta:
+                        card_lines.append(italic(esc(meta)))
+                    if snippet:
+                        card_lines.append(esc(snippet[:200]))
+                    cards_html += "\n".join(card_lines) + "\n\n"
+
+                await update.message.reply_text(cards_html.strip(), parse_mode="HTML",
+                    disable_web_page_preview=True)
+
+            # ── 3. First image thumbnail (if available) ────────────────────
+            for s in sources[:5]:
+                img = s.get("image", "")
+                if img and img.startswith("http"):
+                    try:
+                        caption = esc(s.get("title", "")[:200])
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=img,
+                            caption=caption,
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
+                    break  # one image is enough
+
         except Exception as e:
             await thinking_msg.edit_text(f"Web search error: {e}")
 
@@ -1316,24 +1395,25 @@ def main():
         await send(update, "\n".join(lines))
 
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send(update, "Running full system self-check...")
+        from fmt import bold, code, italic, esc
+        await send(update, "🔍 Running full system self-check…")
         try:
             r = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20)
             r.raise_for_status()
             d = r.json()
             overall = d.get("overall", "unknown")
-            emoji = "✅" if overall == "ok" else "⚠️"
-            lines = [f"{emoji} *Jarvis Self-Check* — {overall.upper()}\n"]
+            emoji   = "✅" if overall == "ok" else "⚠️"
+            lines   = [f"{emoji} {bold('Jarvis Self-Check')} — {bold(overall.upper())}\n"]
             for k, v in d.get("checks", {}).items():
-                lines.append(f"{_check_icon(k, v)} `{k}`: {v}")
+                lines.append(f"{_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
             issues = d.get("issues", [])
             if issues:
-                lines.append("\n*Issues:*")
+                lines.append(f"\n{bold('Issues:')}")
                 for iss in issues:
-                    lines.append(f"  • {iss}")
+                    lines.append(f"  • {esc(iss)}")
             await send(update, "\n".join(lines))
         except Exception as e:
-            await send(update, f"Self-check failed: {e}")
+            await send(update, f"Self-check failed: {esc(str(e))}")
 
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1406,21 +1486,49 @@ def main():
 
         # Web search auto-detection — check before LLM call
         from web_search import is_web_query, web_answer
+        from fmt import bold, italic, link, esc
         if is_web_query(text):
-            thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+            thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir…")
             try:
                 answer, sources = web_answer(text, use_cloud=True)
-                if sources and "http" not in answer:
-                    links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
-                    answer = answer + "\n\n" + links
                 add_to_history(uid, "user", text)
                 add_to_history(uid, "assistant", answer)
-                parts = split_message(answer)
-                for i, part in enumerate(parts):
-                    if i == 0:
-                        await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
-                    else:
-                        await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                # Edit thinking msg with AI summary
+                summary_html = _to_html(answer)
+                await thinking_msg.edit_text(summary_html, parse_mode="HTML")
+                # Source cards
+                if sources:
+                    cards = f"🔗 {bold('Sources')}\n\n"
+                    for i, s in enumerate(sources[:4], 1):
+                        t   = esc(s.get("title", f"Source {i}")[:80])
+                        url = s.get("url", "")
+                        snip = esc((s.get("snippet") or s.get("full_text") or "")[:160])
+                        date = s.get("date", "")[:10]
+                        src  = s.get("source", "")
+                        meta = "  ".join(filter(None, [date, src]))
+                        header = bold(link(t, url)) if url else bold(t)
+                        line = header
+                        if meta:
+                            line += f"\n{italic(esc(meta))}"
+                        if snip:
+                            line += f"\n{snip}"
+                        cards += line + "\n\n"
+                    await update.message.reply_text(cards.strip(), parse_mode="HTML",
+                        disable_web_page_preview=True)
+                # Image thumbnail
+                for s in sources[:5]:
+                    img = s.get("image", "")
+                    if img and img.startswith("http"):
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=update.effective_chat.id,
+                                photo=img,
+                                caption=esc(s.get("title", "")[:200]),
+                                parse_mode="HTML",
+                            )
+                        except Exception:
+                            pass
+                        break
             except Exception as e:
                 await thinking_msg.edit_text(f"Web search error: {e}")
             return
@@ -1432,12 +1540,21 @@ def main():
             response, iid = query_jarvis(uid, text)
             if iid:
                 _last_interaction[uid] = iid
-            parts = split_message(response)
+            html_response = _to_html(response)
+            parts = split_message(html_response)
             for i, part in enumerate(parts):
-                if i == 0:
-                    await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
-                else:
-                    await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                try:
+                    if i == 0:
+                        await thinking_msg.edit_text(part, parse_mode="HTML")
+                    else:
+                        await update.message.reply_text(part, parse_mode="HTML")
+                except Exception:
+                    # Fallback: send as plain text if HTML parse fails
+                    plain = part.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "")
+                    if i == 0:
+                        await thinking_msg.edit_text(plain)
+                    else:
+                        await update.message.reply_text(plain)
             # Show feedback buttons after the last part (only for logged interactions)
             if iid:
                 await update.message.reply_text(
