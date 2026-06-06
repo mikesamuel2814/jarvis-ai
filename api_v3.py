@@ -136,6 +136,7 @@ app = FastAPI(title="Jarvis 3.0 API", version="3.0.0")
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     if not API_KEY:
         return
+    log.info("Auth check: received len=%d, expected len=%d, match=%s", len(x_api_key or ""), len(API_KEY), x_api_key == API_KEY)
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
@@ -191,15 +192,15 @@ def health():
 # ── v2-compatible endpoints ─────────────────────────────────────────
 
 @app.get("/v2/actions")
-def list_actions(api_key: str = Header(default="")):
-    require_api_key(api_key)
+def list_actions(x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     from tools.compat import list_v2_actions
     return {"actions": list_v2_actions()}
 
 
 @app.post("/v2/action/{action_name}")
-def run_v2_action(action_name: str, payload: dict = {}, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def run_v2_action(action_name: str, payload: dict = {}, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     from tools.compat import run_action
     result = run_action(action_name, arg=payload.get("arg", ""), approved=payload.get("approved", False))
     return result
@@ -208,9 +209,9 @@ def run_v2_action(action_name: str, payload: dict = {}, api_key: str = Header(de
 # ── v2-compatible action endpoint (used by telegram_bot.py) ─────────
 
 @app.post("/action")
-def action_post(payload: dict = {}, api_key: str = Header(default="")):
+def action_post(payload: dict = {}, x_api_key: str = Header(default=None)):
     """v2-compatible action endpoint. Returns {success, output, action, tier, request_id}."""
-    require_api_key(api_key)
+    require_api_key(x_api_key)
     from tools.compat import run_action
     action_name = payload.get("action", "")
     arg = payload.get("arg", "")
@@ -227,16 +228,16 @@ def action_post(payload: dict = {}, api_key: str = Header(default="")):
 # ── v3 Tool endpoints ───────────────────────────────────────────────
 
 @app.get("/v3/tools")
-def list_tools(category: Optional[str] = None, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def list_tools(category: Optional[str] = None, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     reg = get_tool_registry()
     tools = reg.list_tools(category=category)
     return {"tools": tools, "count": len(tools)}
 
 
 @app.get("/v3/tools/{tool_name}")
-def get_tool(tool_name: str, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def get_tool(tool_name: str, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     reg = get_tool_registry()
     meta = reg.get(tool_name)
     if not meta:
@@ -245,8 +246,8 @@ def get_tool(tool_name: str, api_key: str = Header(default="")):
 
 
 @app.post("/v3/tools/{tool_name}/execute")
-def execute_tool(tool_name: str, req: ToolExecuteRequest, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def execute_tool(tool_name: str, req: ToolExecuteRequest, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     reg = get_tool_registry()
     result = reg.execute(tool_name, **req.params)
     return {
@@ -259,8 +260,8 @@ def execute_tool(tool_name: str, req: ToolExecuteRequest, api_key: str = Header(
 
 
 @app.get("/v3/tools/search")
-def search_tools(q: str, n: int = 10, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def search_tools(q: str, n: int = 10, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     reg = get_tool_registry()
     results = reg.find_tools(q, n=n)
     return {"query": q, "results": results}
@@ -269,8 +270,8 @@ def search_tools(q: str, n: int = 10, api_key: str = Header(default="")):
 # ── v3 Orchestrator ─────────────────────────────────────────────────
 
 @app.post("/v3/orchestrate")
-async def orchestrate(req: OrchestrateRequest, api_key: str = Header(default="")):
-    require_api_key(api_key)
+async def orchestrate(req: OrchestrateRequest, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     if not _feature_flag("orchestrator"):
         raise HTTPException(status_code=503, detail="Orchestrator not enabled")
 
@@ -290,8 +291,8 @@ async def orchestrate(req: OrchestrateRequest, api_key: str = Header(default="")
 # ── v3 Brain Router ─────────────────────────────────────────────────
 
 @app.post("/v3/route")
-def route_query(req: RouteRequest, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def route_query(req: RouteRequest, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     if not _feature_flag("brain_router"):
         raise HTTPException(status_code=503, detail="Brain router not enabled")
 
@@ -303,8 +304,8 @@ def route_query(req: RouteRequest, api_key: str = Header(default="")):
 # ── v3 Guardian ─────────────────────────────────────────────────────
 
 @app.get("/v3/guardian/check")
-def guardian_check(api_key: str = Header(default="")):
-    require_api_key(api_key)
+def guardian_check(x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     if not _feature_flag("guardian"):
         raise HTTPException(status_code=503, detail="Guardian not enabled")
 
@@ -316,8 +317,8 @@ def guardian_check(api_key: str = Header(default="")):
 # ── v3 Swarm Status ─────────────────────────────────────────────────
 
 @app.get("/v3/swarm/status")
-def swarm_status(api_key: str = Header(default="")):
-    require_api_key(api_key)
+def swarm_status(x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     if not _feature_flag("nano_swarm"):
         raise HTTPException(status_code=503, detail="Nano swarm not enabled")
 
@@ -332,9 +333,9 @@ def swarm_status(api_key: str = Header(default="")):
 # ── Bot-support endpoints (v2-compatible) ───────────────────────────
 
 @app.post("/claude-plan")
-def claude_plan(payload: dict = {}, api_key: str = Header(default="")):
+def claude_plan(payload: dict = {}, x_api_key: str = Header(default=None)):
     """v2-compatible claude-plan endpoint."""
-    require_api_key(api_key)
+    require_api_key(x_api_key)
     query = payload.get("query", "")
     try:
         from claude_planner import plan_task
@@ -346,9 +347,9 @@ def claude_plan(payload: dict = {}, api_key: str = Header(default="")):
 
 
 @app.post("/feedback")
-def feedback_post(payload: dict = {}, api_key: str = Header(default="")):
+def feedback_post(payload: dict = {}, x_api_key: str = Header(default=None)):
     """v2-compatible feedback endpoint."""
-    require_api_key(api_key)
+    require_api_key(x_api_key)
     # Store feedback for training pipeline
     feedback_file = JARVIS_HOME / "data" / "feedback.jsonl"
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
@@ -358,9 +359,9 @@ def feedback_post(payload: dict = {}, api_key: str = Header(default="")):
 
 
 @app.post("/learn")
-def learn_post(api_key: str = Header(default="")):
+def learn_post(x_api_key: str = Header(default=None)):
     """v2-compatible learn endpoint — triggers training."""
-    require_api_key(api_key)
+    require_api_key(x_api_key)
     try:
         subprocess.Popen(
             [sys.executable, str(JARVIS_HOME / "selftrain_v2.py")],
@@ -374,9 +375,9 @@ def learn_post(api_key: str = Header(default="")):
 
 
 @app.post("/correct")
-def correct_post(payload: dict = {}, api_key: str = Header(default="")):
+def correct_post(payload: dict = {}, x_api_key: str = Header(default=None)):
     """v2-compatible correction endpoint."""
-    require_api_key(api_key)
+    require_api_key(x_api_key)
     corrections_file = JARVIS_HOME / "data" / "corrections.jsonl"
     corrections_file.parent.mkdir(parents=True, exist_ok=True)
     with open(corrections_file, "a") as f:
@@ -387,8 +388,8 @@ def correct_post(payload: dict = {}, api_key: str = Header(default="")):
 # ── Memory endpoints (v2-compatible) ────────────────────────────────
 
 @app.get("/memory/query")
-def memory_query(q: str, n: int = 8, api_key: str = Header(default="")):
-    require_api_key(api_key)
+def memory_query(q: str, n: int = 8, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
     try:
         import chromadb
         client = chromadb.PersistentClient(path=str(JARVIS_HOME / "memory"))

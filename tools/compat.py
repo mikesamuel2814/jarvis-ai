@@ -15,6 +15,7 @@ log = logging.getLogger("jarvis.tools.compat")
 # This preserves all existing v2 behavior while routing through v3 infrastructure.
 _V2_TO_V3: dict[str, str] = {
     # System info
+    "cpu": "cpu_info",
     "ps": "ps_list",
     "disk": "disk_space",
     "memory": "ram_usage",
