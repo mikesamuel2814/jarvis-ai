@@ -482,7 +482,7 @@ async def action(req: ActionRequest):
     one is the executor dict {"success","output","action",...}.
     """
     try:
-        from executor import ACTIONS, AUTO
+        from executor import ACTIONS, AUTO, HARD_BLOCKED
         from permissions import create_request
         from action_flow import run_action_step
 
@@ -492,6 +492,11 @@ async def action(req: ActionRequest):
                 content={"success": False, "output": f"Unknown action: {req.action}",
                          "action": req.action},
             )
+
+        # Hard-blocked actions: refuse immediately, never create an approval request.
+        if req.action in HARD_BLOCKED:
+            return {"success": False, "output": HARD_BLOCKED[req.action],
+                    "action": req.action, "blocked": True}
 
         entry = ACTIONS[req.action]
         tier = entry["tier"]

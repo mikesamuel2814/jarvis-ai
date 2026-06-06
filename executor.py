@@ -19,6 +19,21 @@ AUTO = "auto"
 CONFIRM = "confirm"
 APPROVE = "approve"
 
+# ── Hard-blocked actions ────────────────────────────────────────────────────────
+# Actions disabled outright, regardless of approval. update_system is blocked
+# because `apt upgrade` soft-locked a CPU core via a wedged dpkg-query on the
+# bleeding-edge Kali 6.19 kernel + out-of-tree NVIDIA modules (2026-06-07 crash).
+# Remove an entry here once the underlying cause is resolved (e.g. stable kernel
+# pinned). Run `apt upgrade` interactively in a terminal until then.
+HARD_BLOCKED = {
+    "update_system": (
+        "🚫 update_system is disabled. Running `apt upgrade` unattended wedged a "
+        "CPU core (stuck dpkg-query → kernel soft lockup) on the current kernel. "
+        "Run it interactively in a terminal instead: `sudo apt update && sudo apt upgrade`. "
+        "Re-enable by removing it from executor.HARD_BLOCKED after pinning a stable kernel."
+    ),
+}
+
 # ── Whitelisted actions ────────────────────────────────────────────────────────
 # Each entry: description, shell command (None = custom fn), tier, optional arg slot
 ACTIONS: dict[str, dict] = {
@@ -311,6 +326,12 @@ def run_action(action_name: str, arg: str = "", approved: bool = False) -> dict:
     _audit(f"EXECUTE {action_name} arg={arg!r} approved={approved}")
     if action_name not in ACTIONS:
         return {"success": False, "output": f"Unknown action: {action_name}", "action": action_name}
+
+    # Hard block — refuse outright, even if approved.
+    if action_name in HARD_BLOCKED:
+        _audit(f"BLOCKED {action_name} (hard-blocked)")
+        return {"success": False, "output": HARD_BLOCKED[action_name],
+                "action": action_name, "tier": ACTIONS[action_name]["tier"], "blocked": True}
 
     entry = ACTIONS[action_name]
     tier = entry["tier"]
