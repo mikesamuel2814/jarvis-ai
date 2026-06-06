@@ -38,6 +38,7 @@ _CHROMEDRIVER    = "/usr/bin/chromedriver"
 _PAGE_TIMEOUT    = 20_000   # ms
 _IMPLICIT_WAIT   = 8        # seconds
 _MAX_ATTEMPTS    = 3        # open_url tries (1 + 2 fresh-driver crash retries)
+_IDLE_TIMEOUT    = 120      # seconds of inactivity → auto-close the browser
 
 # Substrings that indicate the renderer/tab died and the driver is unusable.
 _CRASH_MARKERS = (
@@ -206,6 +207,8 @@ class BrowserAgent:
     def __init__(self):
         self._driver_lock = threading.Lock()
         self._driver = None
+        self._last_used = 0.0
+        self._watchdog: threading.Thread | None = None
 
     @classmethod
     def get(cls) -> BrowserAgent:
@@ -233,6 +236,40 @@ class BrowserAgent:
             self._driver = None
             self._driver = _make_driver()
             log.info("Chromium ready.")
+        self._touch()
+
+    def _touch(self) -> None:
+        """Mark activity and make sure the idle watchdog is running."""
+        self._last_used = time.time()
+        if self._watchdog is None or not self._watchdog.is_alive():
+            self._watchdog = threading.Thread(
+                target=self._idle_reaper, name="browser-idle-reaper", daemon=True
+            )
+            self._watchdog.start()
+
+    def _idle_reaper(self) -> None:
+        """Auto-close the resident browser after _IDLE_TIMEOUT of inactivity, so
+        a warmed-up session left on a heavy SPA page never spins CPU forever."""
+        while True:
+            time.sleep(15)
+            with self._driver_lock:
+                if self._driver is None:
+                    return  # nothing to watch; exit thread
+                idle = time.time() - self._last_used
+                if idle >= _IDLE_TIMEOUT:
+                    log.info("Browser idle %.0fs ≥ %ds — closing to free CPU.", idle, _IDLE_TIMEOUT)
+                    _hard_kill_driver(self._driver)
+                    self._driver = None
+                    return
+
+    def _park(self) -> None:
+        """Navigate the current driver to about:blank to release the previous
+        (possibly heavy/JS-busy) page's renderer work between calls. Best-effort."""
+        try:
+            if self._driver is not None:
+                self._driver.get("about:blank")
+        except Exception:
+            pass
 
     # ── Navigation ────────────────────────────────────────────────────
 
@@ -259,7 +296,9 @@ class BrowserAgent:
                             EC.presence_of_element_located((By.CSS_SELECTOR, wait_for))
                         )
                     time.sleep(1.5)  # let JS settle
-                    return self._extract_text()
+                    text = self._extract_text()
+                    self._park()  # release the heavy page's renderer → no idle CPU
+                    return text
                 except Exception as exc:
                     if attempt < _MAX_ATTEMPTS and _is_crash(exc):
                         log.warning(
@@ -329,7 +368,9 @@ class BrowserAgent:
             for attempt in range(1, _MAX_ATTEMPTS + 1):
                 self._ensure_driver(force=(attempt > 1))
                 try:
-                    return self._google_search_once(query, num)
+                    results = self._google_search_once(query, num)
+                    self._park()  # release the results page → no idle CPU
+                    return results
                 except Exception as exc:
                     if attempt < _MAX_ATTEMPTS and _is_crash(exc):
                         log.warning(
