@@ -1,0 +1,97 @@
+// OpenClaw configuration for Jarvis 2.0
+// Copy to: ~/.openclaw/openclaw.json
+// Fill in values marked with REPLACE_ME
+// OpenClaw uses JSON5 format (comments allowed)
+// Docs: https://docs.openclaw.ai/gateway/configuration
+{
+  // ── AI Model ────────────────────────────────────────────────────
+  agent: {
+    model: "moonshot/kimi-k2.6",
+  },
+
+  // ── Custom model provider: Moonshot AI ──────────────────────────
+  // Kimi K2.6 via OpenAI-compatible endpoint
+  models: {
+    providers: {
+      moonshot: {
+        type: "openai-compatible",
+        baseUrl: "https://api.moonshot.ai/v1",
+        apiKey: "${MOONSHOT_API_KEY}",    // set in env section below
+      },
+    },
+  },
+
+  // ── Environment variables (injected into all skills) ────────────
+  env: {
+    MOONSHOT_API_KEY: "REPLACE_ME",        // From: https://platform.kimi.ai
+    JARVIS_API_URL:   "http://127.0.0.1:8181",
+    JARVIS_API_KEY:   "REPLACE_ME",        // Value of JARVIS_API_KEY env var
+    JARVIS_VPS_HOST:  "38.47.35.16",
+  },
+
+  // ── Agent defaults ───────────────────────────────────────────────
+  agents: {
+    defaults: {
+      workspace: "~/.openclaw/workspace",
+
+      // Heartbeat: runs every 30 minutes
+      // OpenClaw agent checks HEARTBEAT.md and completes each task
+      heartbeat: {
+        enabled:   true,
+        interval:  1800,           // seconds (30 min)
+        checklist: "~/.jarvis/openclaw_config/HEARTBEAT.md",
+      },
+
+      // Skills available to all agents
+      skills: ["jarvis-system"],
+
+      // Sandbox: non-main isolation
+      sandbox: {
+        mode: "non-main",
+      },
+    },
+  },
+
+  // ── Telegram channel ────────────────────────────────────────────
+  channels: {
+    telegram: {
+      enabled:    true,
+      botToken:   "${TELEGRAM_BOT_TOKEN}",   // set TELEGRAM_BOT_TOKEN in env
+      dmPolicy:   "allowlist",               // only allow listed users
+      allowFrom:  ["tg:REPLACE_WITH_YOUR_TELEGRAM_USER_ID"],
+      historyLimit: 50,
+      streaming:  "partial",                 // stream responses progressively
+      actions: {
+        reactions:   true,
+        sendMessage: true,
+      },
+      retry: {
+        attempts:   3,
+        minDelayMs: 400,
+        maxDelayMs: 30000,
+      },
+    },
+  },
+
+  // ── Skills ──────────────────────────────────────────────────────
+  skills: {
+    // Local skills directory
+    localPaths: ["~/.openclaw/workspace/skills"],
+    // Require approval before installing new ClawHub skills
+    approvalRequired: true,
+    // Auto-install is disabled for security
+    autoInstall: false,
+  },
+
+  // ── Sessions ─────────────────────────────────────────────────────
+  sessions: {
+    scope: "per-sender",           // each user gets their own session
+    storage: "~/.openclaw/sessions",
+  },
+
+  // ── Gateway ──────────────────────────────────────────────────────
+  gateway: {
+    port: 18789,
+    host: "127.0.0.1",             // local only — never expose to internet
+  },
+}

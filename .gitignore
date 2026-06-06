@@ -21,3 +21,7 @@ config/telegram.json
 *.swp
 .vscode/
 .idea/
+
+# Jarvis 2.0 — never commit secrets or generated data
+config/secrets.env
+*.env

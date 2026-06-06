@@ -1,0 +1,51 @@
+# Kimi K2.6 Configuration
+# Moonshot AI — OpenAI-compatible API
+# Docs: https://platform.kimi.ai/docs/guide/kimi-k2-6-quickstart
+
+kimi:
+  # Credentials — set MOONSHOT_API_KEY in ~/.jarvis/config/credentials.yaml
+  api_key: "${MOONSHOT_API_KEY}"
+  base_url: "https://api.moonshot.ai/v1"
+
+  # Model identifiers
+  models:
+    # Default — thinking ON, 262K ctx, $0.95/$4.00 per MTok
+    default: "kimi-k2.6"
+    # Alias used in OpenClaw config
+    openclaw_ref: "moonshot/kimi-k2.6"
+
+  context_window: 262144      # 262,144 tokens (256K)
+  max_output_tokens: 8192
+
+  # K2.6 thinking mode is ON by default.
+  # To disable for low-latency calls: extra_body={"thinking":{"type":"disabled"}}
+  thinking:
+    default: "enabled"
+    # Temperature: 1.0 with thinking, 0.6 without
+    temperature_thinking: 1.0
+    temperature_instant: 0.6
+
+  # Pricing (Moonshot direct, June 2026)
+  cost_per_million:
+    input: 0.95
+    output: 4.00
+
+  # Rate limits (Tier 2 account)
+  rate_limits:
+    requests_per_minute: 60
+    tokens_per_minute: 100000
+    # Never send a single call over this many tokens
+    max_single_call_tokens: 200000
+
+  # Privacy boundary — these path prefixes NEVER get sent to Kimi
+  # Violations are blocked in kimi/client.py
+  privacy_blocklist:
+    - "Payment-Gateway"
+    - "AsthaCash"
+    - ".ssh"
+    - "credentials"
+    - ".env"
+    - "secrets"
+    - "private_key"
+    - "id_rsa"
+    - "id_ed25519"

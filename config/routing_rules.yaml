@@ -1,0 +1,80 @@
+# Brain Tier Routing Rules
+# Auto-updated by selftrain_v2.py on Sunday 2 AM
+# Manual edits OK — reloaded on each query by brain.py
+
+routing:
+  # ── EDGE (local Ollama) ─────────────────────────────────────────
+  # Evaluated FIRST to protect cost.
+  edge:
+    # Whole-word / phrase matches (not substring)
+    patterns:
+      - "\\bhello\\b"
+      - "\\bhi\\b"
+      - "\\bhey\\b"
+      - "\\bgood morning\\b"
+      - "\\bdisk space\\b"
+      - "\\bdisk usage\\b"
+      - "\\bcpu usage\\b"
+      - "\\bgpu temp\\b"
+      - "\\bram usage\\b"
+      - "\\buptime\\b"
+      - "\\bps aux\\b"
+      - "\\btop\\b"
+      - "\\bjobs\\b"
+      - "\\brestart jarvis\\b"
+      - "\\bclear history\\b"
+      - "\\bwhat time\\b"
+      - "\\bping\\b"
+    # System/sysinfo queries bypass LLM entirely (instant)
+    sysinfo_keywords:
+      - "disk"
+      - "cpu"
+      - "ram"
+      - "memory"
+      - "uptime"
+      - "gpu"
+      - "temperature"
+      - "processes"
+      - "services"
+    # Short code questions under this char count → Edge
+    code_char_limit: 200
+    # Explicit prefix overrides
+    prefixes: ["!local", "!edge", "!fast"]
+
+  # ── CLOUD (Kimi K2.6) ──────────────────────────────────────────
+  cloud:
+    patterns:
+      - "\\bwhy\\b"
+      - "\\banalyze\\b"
+      - "\\bexplain\\b"
+      - "\\bcompare\\b"
+      - "\\bevaluate\\b"
+      - "\\barchitecture\\b"
+      - "\\bdesign pattern\\b"
+      - "\\bsecurity audit\\b"
+      - "\\bperformance review\\b"
+      - "\\bcode review\\b"
+      - "\\bsecurity review\\b"
+      - "\\brefactor\\b"
+      - "\\bdeploy\\b"
+      - "\\binfrastructure\\b"
+      - "\\bentire codebase\\b"
+      - "\\bfull project\\b"
+      - "\\bextract lesson\\b"
+      - "\\blong context\\b"
+    # History depth threshold — long conversations → Cloud
+    history_depth_threshold: 20
+    prefixes: ["!cloud", "!kimi", "!deep"]
+
+  # ── HYBRID (Local pre-analysis + Cloud reasoning) ──────────────
+  # Skip Hybrid if query is short and code-related (use Edge)
+  hybrid:
+    prefixes: ["!hybrid"]
+    # Hybrid for code queries longer than edge.code_char_limit
+    # Default for anything not matching Edge or Cloud
+
+  # ── ACCURACY TRACKING ──────────────────────────────────────────
+  accuracy:
+    # Thresholds auto-updated by evolve_routing_rules()
+    edge_code_min_accuracy: 0.80
+    cloud_max_daily_cost_usd: 5.00

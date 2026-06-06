@@ -1,0 +1,22 @@
+[Unit]
+Description=Jarvis Cursor IDE Bridge
+After=jarvis.service
+
+[Service]
+Type=simple
+User=kali
+Group=kali
+WorkingDirectory=/home/kali/.jarvis
+EnvironmentFile=-/home/kali/.jarvis/config/secrets.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/home/kali/.jarvis/venv/bin/python3 /home/kali/.jarvis/cursor/watcher.py
+
+Restart=on-failure
+RestartSec=15
+
+StandardOutput=append:/home/kali/.jarvis/logs/cursor_bridge.log
+StandardError=append:/home/kali/.jarvis/logs/cursor_bridge.log
+
+[Install]
+WantedBy=multi-user.target
