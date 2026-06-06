@@ -35,8 +35,8 @@ ROUTING_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 class BrainTier(Enum):
     EDGE   = "edge"    # Local Ollama — zero cost, zero latency
-    HYBRID = "hybrid"  # Local pre-analysis + Kimi reasoning
-    CLOUD  = "cloud"   # Kimi K2.6 — deep reasoning, 256K context
+    HYBRID = "hybrid"  # Local pre-analysis + Claude reasoning
+    CLOUD  = "cloud"   # Claude Sonnet — deep reasoning (swap to Kimi when key available)
 
 
 # ── Config loaders ────────────────────────────────────────────────
@@ -106,7 +106,7 @@ def route(
     for pfx in e_rules.get("prefixes", ["!local", "!edge", "!fast"]):
         if ql.startswith(pfx):
             return BrainTier.EDGE
-    for pfx in c_rules.get("prefixes", ["!cloud", "!kimi", "!deep"]):
+    for pfx in c_rules.get("prefixes", ["!cloud", "!kimi", "!claude", "!deep"]):
         if ql.startswith(pfx):
             return BrainTier.CLOUD
     for pfx in rules.get("hybrid", {}).get("prefixes", ["!hybrid"]):
