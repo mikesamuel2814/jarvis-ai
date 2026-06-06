@@ -121,15 +121,30 @@ async def cache_request_body(request: Request, call_next):
 
 # ── RAG helper ──────────────────────────────────────────────────────
 
+def _embed_query(text: str) -> list[float] | None:
+    """Embed text with mxbai-embed-large via Ollama (1024-dim, matches collection)."""
+    try:
+        import ollama as _ollama
+        return _ollama.embeddings(model="mxbai-embed-large", prompt=text[:4096])["embedding"]
+    except Exception as e:
+        log.warning("Embedding failed: %s", e)
+        return None
+
+
 def retrieve_rag_context(query: str, n: int = 8) -> tuple[str, list[str]]:
     """Query ChromaDB and return context string + chunk IDs."""
     try:
         col = get_collection()
-        results = col.query(
-            query_texts=[query],
-            n_results=n,
-            include=["documents", "metadatas", "distances"],
-        )
+        emb = _embed_query(query)
+        query_kwargs: dict = {
+            "n_results": n,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if emb is not None:
+            query_kwargs["query_embeddings"] = [emb]
+        else:
+            query_kwargs["query_texts"] = [query]
+        results = col.query(**query_kwargs)
         docs      = results.get("documents", [[]])[0]
         metas     = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
