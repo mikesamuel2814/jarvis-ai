@@ -1166,6 +1166,104 @@ def main():
         except Exception as e:
             await send(update, f"OpenClaw error: {e}")
 
+    async def kali_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Kali pentest tools (authorized security testing).
+        /kali                        → list tools by level
+        /kali <tool> <target> [opts] → run a tool (approve-tier prompts a button)
+        """
+        args = context.args or []
+        # No args → help / tool catalogue grouped by level
+        if not args:
+            try:
+                from kali_tools import list_tools
+                tools = list_tools()
+            except Exception as e:
+                await send(update, f"Sir, Kali tools are not available: {e}")
+                return
+            level_names = {
+                1: "🔍 L1 Recon (passive, auto)",
+                2: "📡 L2 Scan/Enum (active, approval)",
+                3: "🌐 L3 Web (active, approval)",
+                4: "💥 L4 Intrusive/Exploit (approval)",
+            }
+            by_level: dict[int, list] = {}
+            for t in tools:
+                by_level.setdefault(t.get("level", 0), []).append(t)
+            lines = ["Sir, Kali pentest tools (authorized targets only):\n"]
+            for lvl in sorted(by_level):
+                lines.append(f"*{level_names.get(lvl, f'Level {lvl}')}*")
+                for t in sorted(by_level[lvl], key=lambda x: x["name"]):
+                    tier_icon = "⚡" if t["tier"] == "auto" else "🔐"
+                    lines.append(f"  {tier_icon} `{t['name']}` — {t['desc']}")
+                lines.append("")
+            lines.append("Usage: `/kali <tool> <target> [opts]`")
+            lines.append("Example: `/kali nmap_quick scanme.nmap.org`")
+            lines.append("Reports land in `~/.jarvis/scans/` (see /scans).")
+            await send(update, "\n".join(lines))
+            return
+
+        tool = args[0]
+        if tool.startswith("kali_"):
+            tool = tool[len("kali_"):]
+        target = args[1] if len(args) > 1 else ""
+        opts = " ".join(args[2:]) if len(args) > 2 else ""
+        if not target:
+            await send(update, f"Sir, I need a target.\nUsage: `/kali {tool} <target> [opts]`")
+            return
+
+        # Scope pre-check so we can warn before anything runs.
+        scope_warn = ""
+        try:
+            from kali_tools import validate_scope
+            sc = validate_scope(target)
+            if not sc.get("in_scope", True):
+                scope_warn = f"⚠️ *OUT OF SCOPE* target `{target}` — {sc.get('reason','')}\nApproval will be required.\n\n"
+        except Exception:
+            pass
+
+        action = f"kali_{tool}"
+        arg = (target + " " + opts).strip()
+
+        await update.message.chat.send_action("typing")
+        await send(update, f"{scope_warn}Sir, dispatching `{tool}` against `{target}`...")
+
+        # Run the (potentially long) scan off the event loop so the bot stays responsive.
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(None, run_action_via_api, action, arg)
+        except Exception as e:
+            await send(update, f"Kali error: {e}")
+            return
+
+        # run_action_via_api returns a string. For approve-tier it contains the
+        # pending-approval text (with request id); surface it with the scope banner.
+        await send(update, (scope_warn + result) if scope_warn else result)
+
+    async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List the last ~10 scan reports in ~/.jarvis/scans/."""
+        from datetime import datetime
+        scans_dir = JARVIS_HOME / "scans"
+        if not scans_dir.exists():
+            await send(update, "Sir, no scans yet — `~/.jarvis/scans/` is empty.")
+            return
+        files = sorted(
+            [p for p in scans_dir.iterdir() if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:10]
+        if not files:
+            await send(update, "Sir, no scan reports found yet.")
+            return
+        lines = ["Sir, latest scan reports:\n"]
+        for p in files:
+            st = p.stat()
+            size = st.st_size
+            size_h = f"{size}B" if size < 1024 else (f"{size//1024}KB" if size < 1024*1024 else f"{size//(1024*1024)}MB")
+            mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+            lines.append(f"  📄 `{p.name}` — {size_h}, {mtime}")
+        lines.append("\nRead one with `/exec read file <path>` or open in the file viewer.")
+        await send(update, "\n".join(lines))
+
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
@@ -1330,6 +1428,8 @@ def main():
     app_bot.add_handler(CommandHandler("browse", browse_cmd))
     app_bot.add_handler(CommandHandler("oc", oc_cmd))
     app_bot.add_handler(CommandHandler("openclaw", oc_cmd))
+    app_bot.add_handler(CommandHandler("kali", kali_cmd))
+    app_bot.add_handler(CommandHandler("scans", scans_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

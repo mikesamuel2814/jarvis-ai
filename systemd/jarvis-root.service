@@ -1,0 +1,25 @@
+[Unit]
+Description=Jarvis Root Helper — privileged execution choke-point for Jarvis
+Documentation=file:///home/kali/.jarvis/jarvis_root.py
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/home/kali/.jarvis/venv/bin/python3 /home/kali/.jarvis/jarvis_root.py
+Restart=on-failure
+RestartSec=5
+
+# Audit + transparency
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-root
+
+# This service is intentionally root and intentionally minimal. The only code
+# that runs as root is jarvis_root.py (a single audited socket handler). The
+# main jarvis/jarvis-telegram services stay NON-root so the web/RAG/Telegram
+# injection surface never executes with root privileges.
+
+[Install]
+WantedBy=multi-user.target
