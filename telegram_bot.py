@@ -307,8 +307,8 @@ def get_stats() -> str:
         resp = requests.get(f"{API_BASE}/stats", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        chunks = d.get("memory_chunks", 0)
-        model = d.get("primary_model", "N/A")
+        chunks = d.get("total_chunks", d.get("memory_chunks", 0))
+        model = d.get("primary_model", d.get("model", "deepseek-r1:7b"))
         breakdown = d.get("source_type_breakdown", {})
         top = sorted(breakdown.items(), key=lambda x: -x[1])
         src_lines = "  ".join(f"`{k}:{v}`" for k, v in top)
@@ -327,12 +327,11 @@ def get_health() -> str:
         resp = requests.get(f"{API_BASE}/health", timeout=10)
         resp.raise_for_status()
         d = resp.json()
-        ok = d.get("status") == "healthy"
+        ok = d.get("status") in ("healthy", "ok")
         icon = "✅" if ok else "⚠️"
         return (
             f"{icon} *Jarvis* — {d.get('status', 'unknown')}\n"
-            f"Ollama: `{d.get('ollama')}` | Memory: `{d.get('memory_chunks', 0):,}` chunks\n"
-            f"Model: `{d.get('model')}`"
+            f"Ollama: `{d.get('ollama')}` | ChromaDB: `{d.get('chromadb', d.get('memory', '?'))}`"
         )
     except Exception as e:
         return f"Health check failed: {e}"
@@ -356,8 +355,8 @@ def get_sysinfo() -> str:
         svc_ok = hl.get("status") == "healthy"
         svc_icon = "✅" if svc_ok else "⚠️"
 
-        chunks = st.get("memory_chunks", 0)
-        model = st.get("primary_model", "N/A")
+        chunks = st.get("total_chunks", st.get("memory_chunks", 0))
+        model = st.get("primary_model", st.get("model", "deepseek-r1:7b"))
         breakdown = st.get("source_type_breakdown", {})
         top2 = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
         src = "  ".join(f"`{k}:{v}`" for k, v in top2)
@@ -686,7 +685,23 @@ def _format_action_output(action: str, output: str) -> str:
 
 
 def run_action_via_api(action: str, arg: str = "") -> str:
-    """Call the Jarvis API to execute an action."""
+    """Execute an action — OpenClaw first (read/introspection), executor fallback.
+
+    OpenClaw's HTTP gateway safely serves read/introspection tools and hard-denies
+    shell/mutating actions, so we try it first and fall back to the tiered executor
+    (/action) for anything it doesn't serve. This keeps mutating actions on the
+    permission-gated executor path while letting OpenClaw handle live introspection.
+    """
+    try:
+        from openclaw.bridge import run_action as oc_run_action
+        oc = oc_run_action(action, {"arg": arg} if arg else None)
+        if oc.get("ok"):
+            out = oc.get("output", "") or "Done."
+            return f"✅ {_format_action_output(action, out)}"
+        # ok=False with fallback=True → fall through to executor below
+    except Exception as e:
+        log.debug("OpenClaw run_action skipped for %s: %s", action, e)
+
     try:
         resp = requests.post(
             f"{API_BASE}/action",
@@ -1084,6 +1099,183 @@ def main():
         except Exception as e:
             await send(update, f"Exec error: {e}")
 
+    async def web_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Real-time web search + AI analysis. Usage: /web <query>"""
+        query_text = " ".join(context.args).strip() if context.args else ""
+        if not query_text:
+            await send(update, "Usage: /web <query>\nExample: /web latest bitcoin price")
+            return
+        thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+        try:
+            from web_search import web_answer
+            answer, sources = web_answer(query_text, use_cloud=True)
+            if sources and "http" not in answer:
+                links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
+                answer = answer + "\n\n" + links
+            await thinking_msg.edit_text(_to_legacy_markdown(answer), parse_mode="Markdown")
+        except Exception as e:
+            await thinking_msg.edit_text(f"Web search error: {e}")
+
+    async def browse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Open a URL in headless Chrome, summarise + optional screenshot."""
+        args = context.args or []
+        url = args[0] if args else ""
+        want_shot = "--screenshot" in args or "-s" in args
+        if not url or not url.startswith("http"):
+            await send(update, "Usage: /browse <url> [--screenshot]\nExample: /browse https://github.com --screenshot")
+            return
+        thinking_msg = await update.message.reply_text(f"🌐 Opening {url} ...")
+        try:
+            from browser.agent import BrowserAgent, quit_browser
+            agent = BrowserAgent.get()
+            page = agent.fetch(url, want_screenshot=want_shot)
+            page_text, title, png = page["text"], page["title"], page["png"]
+
+            import claude_client
+            system = (
+                "You are Jarvis. Summarise this web page for Mike.\n"
+                "Rules: open with 'Sir,', max 5 bullet points, highlight key facts/numbers, "
+                "note any important links or actions available on the page. No fluff."
+            )
+            summary, _ = claude_client.get_client().query(
+                system=system,
+                user=f"Page title: {title}\n\nContent:\n{page_text[:4000]}",
+            )
+            await thinking_msg.edit_text(_to_legacy_markdown(summary), parse_mode="Markdown")
+
+            if want_shot and png:
+                await update.message.reply_photo(photo=png, caption=f"📸 {title[:80]}")
+        except Exception as e:
+            await thinking_msg.edit_text(f"Browse error: {e}")
+        finally:
+            try:
+                quit_browser()  # close browser after each /browse → zero idle CPU
+            except Exception:
+                pass
+
+    async def oc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """OpenClaw gateway — status or direct tool invoke.
+        /oc            → gateway health
+        /oc <tool>     → invoke an OpenClaw tool (e.g. /oc sessions_list)
+        """
+        args = context.args or []
+        try:
+            from openclaw import bridge as oc
+            if not args:
+                up = oc.openclaw_available()
+                icon = "🟢" if up else "🔴"
+                await send(update, f"{icon} OpenClaw gateway: {'live' if up else 'unavailable'}, Sir.")
+                return
+            tool = args[0]
+            tool_args = {"arg": " ".join(args[1:])} if len(args) > 1 else None
+            await update.message.chat.send_action("typing")
+            res = oc.tool_invoke(tool, tool_args)
+            if res.get("ok"):
+                out = res.get("output", "") or "Done."
+                await send(update, f"✅ *{tool}*\n{out[:3500]}")
+            else:
+                await send(update, f"❌ {tool}: {res.get('reason', 'failed')}")
+        except Exception as e:
+            await send(update, f"OpenClaw error: {e}")
+
+    async def kali_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Kali pentest tools (authorized security testing).
+        /kali                        → list tools by level
+        /kali <tool> <target> [opts] → run a tool (approve-tier prompts a button)
+        """
+        args = context.args or []
+        # No args → help / tool catalogue grouped by level
+        if not args:
+            try:
+                from kali_tools import list_tools
+                tools = list_tools()
+            except Exception as e:
+                await send(update, f"Sir, Kali tools are not available: {e}")
+                return
+            level_names = {
+                1: "🔍 L1 Recon (passive, auto)",
+                2: "📡 L2 Scan/Enum (active, approval)",
+                3: "🌐 L3 Web (active, approval)",
+                4: "💥 L4 Intrusive/Exploit (approval)",
+            }
+            by_level: dict[int, list] = {}
+            for t in tools:
+                by_level.setdefault(t.get("level", 0), []).append(t)
+            lines = ["Sir, Kali pentest tools (authorized targets only):\n"]
+            for lvl in sorted(by_level):
+                lines.append(f"*{level_names.get(lvl, f'Level {lvl}')}*")
+                for t in sorted(by_level[lvl], key=lambda x: x["name"]):
+                    tier_icon = "⚡" if t["tier"] == "auto" else "🔐"
+                    lines.append(f"  {tier_icon} `{t['name']}` — {t['desc']}")
+                lines.append("")
+            lines.append("Usage: `/kali <tool> <target> [opts]`")
+            lines.append("Example: `/kali nmap_quick scanme.nmap.org`")
+            lines.append("Reports land in `~/.jarvis/scans/` (see /scans).")
+            await send(update, "\n".join(lines))
+            return
+
+        tool = args[0]
+        if tool.startswith("kali_"):
+            tool = tool[len("kali_"):]
+        target = args[1] if len(args) > 1 else ""
+        opts = " ".join(args[2:]) if len(args) > 2 else ""
+        if not target:
+            await send(update, f"Sir, I need a target.\nUsage: `/kali {tool} <target> [opts]`")
+            return
+
+        # Scope pre-check so we can warn before anything runs.
+        scope_warn = ""
+        try:
+            from kali_tools import validate_scope
+            sc = validate_scope(target)
+            if not sc.get("in_scope", True):
+                scope_warn = f"⚠️ *OUT OF SCOPE* target `{target}` — {sc.get('reason','')}\nApproval will be required.\n\n"
+        except Exception:
+            pass
+
+        action = f"kali_{tool}"
+        arg = (target + " " + opts).strip()
+
+        await update.message.chat.send_action("typing")
+        await send(update, f"{scope_warn}Sir, dispatching `{tool}` against `{target}`...")
+
+        # Run the (potentially long) scan off the event loop so the bot stays responsive.
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(None, run_action_via_api, action, arg)
+        except Exception as e:
+            await send(update, f"Kali error: {e}")
+            return
+
+        # run_action_via_api returns a string. For approve-tier it contains the
+        # pending-approval text (with request id); surface it with the scope banner.
+        await send(update, (scope_warn + result) if scope_warn else result)
+
+    async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List the last ~10 scan reports in ~/.jarvis/scans/."""
+        from datetime import datetime
+        scans_dir = JARVIS_HOME / "scans"
+        if not scans_dir.exists():
+            await send(update, "Sir, no scans yet — `~/.jarvis/scans/` is empty.")
+            return
+        files = sorted(
+            [p for p in scans_dir.iterdir() if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:10]
+        if not files:
+            await send(update, "Sir, no scan reports found yet.")
+            return
+        lines = ["Sir, latest scan reports:\n"]
+        for p in files:
+            st = p.stat()
+            size = st.st_size
+            size_h = f"{size}B" if size < 1024 else (f"{size//1024}KB" if size < 1024*1024 else f"{size//(1024*1024)}MB")
+            mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+            lines.append(f"  📄 `{p.name}` — {size_h}, {mtime}")
+        lines.append("\nRead one with `/exec read file <path>` or open in the file viewer.")
+        await send(update, "\n".join(lines))
+
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running full system self-check...")
         try:
@@ -1173,6 +1365,27 @@ def main():
                     await send(update, run_action_via_api(action))
                 return
 
+        # Web search auto-detection — check before LLM call
+        from web_search import is_web_query, web_answer
+        if is_web_query(text):
+            thinking_msg = await update.message.reply_text("🔍 Searching the web, Sir...")
+            try:
+                answer, sources = web_answer(text, use_cloud=True)
+                if sources and "http" not in answer:
+                    links = "\n".join(f"[{i+1}] {s['url']}" for i, s in enumerate(sources[:2]) if s['url'])
+                    answer = answer + "\n\n" + links
+                add_to_history(uid, "user", text)
+                add_to_history(uid, "assistant", answer)
+                parts = split_message(answer)
+                for i, part in enumerate(parts):
+                    if i == 0:
+                        await thinking_msg.edit_text(_to_legacy_markdown(part), parse_mode="Markdown")
+                    else:
+                        await update.message.reply_text(_to_legacy_markdown(part), parse_mode="Markdown")
+            except Exception as e:
+                await thinking_msg.edit_text(f"Web search error: {e}")
+            return
+
         # LLM query — send a placeholder first so user sees immediate feedback
         _trigger_training_if_due()
         thinking_msg = await update.message.reply_text("⏳")
@@ -1222,13 +1435,23 @@ def main():
     app_bot.add_handler(CommandHandler("deny", deny_cmd))
     app_bot.add_handler(CommandHandler("task", task_cmd))
     app_bot.add_handler(CommandHandler("exec", exec_cmd))
+    app_bot.add_handler(CommandHandler("web", web_cmd))
+    app_bot.add_handler(CommandHandler("search", web_cmd))
+    app_bot.add_handler(CommandHandler("browse", browse_cmd))
+    app_bot.add_handler(CommandHandler("oc", oc_cmd))
+    app_bot.add_handler(CommandHandler("openclaw", oc_cmd))
+    app_bot.add_handler(CommandHandler("kali", kali_cmd))
+    app_bot.add_handler(CommandHandler("scans", scans_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app_bot.add_error_handler(error_handler)
 
     log.info(f"Jarvis Telegram bot starting (API: {API_BASE})")
-    app_bot.run_polling(allowed_updates=["message", "callback_query"])
+    app_bot.run_polling(
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":

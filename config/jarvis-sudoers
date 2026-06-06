@@ -1,15 +1,22 @@
 # Jarvis NOPASSWD — allows Jarvis service to run these as root without password
-# Install: sudo cp ~/.jarvis/config/jarvis-sudoers /etc/sudoers.d/jarvis && sudo chmod 440 /etc/sudoers.d/jarvis
+# Install: sudo cp /tmp/jarvis-sudoers-new /etc/sudoers.d/jarvis && sudo chmod 440 /etc/sudoers.d/jarvis
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-telegram
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-monitor
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart jarvis-cursor
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ollama
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop jarvis
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop jarvis-telegram
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop openclaw
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis-telegram
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start openclaw
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl start jarvis-cursor
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *
 kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active *
+kali ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+kali ALL=(ALL) NOPASSWD: /usr/bin/cp /home/kali/.jarvis/systemd/*.service /etc/systemd/system/
 kali ALL=(ALL) NOPASSWD: /usr/bin/apt update
 kali ALL=(ALL) NOPASSWD: /usr/bin/apt upgrade -y
 kali ALL=(ALL) NOPASSWD: /usr/sbin/reboot

@@ -1,0 +1,32 @@
+[Unit]
+Description=OpenClaw AI Gateway Daemon
+Documentation=https://docs.openclaw.ai
+After=network.target
+Wants=jarvis.service
+
+[Service]
+Type=simple
+User=kali
+Group=kali
+WorkingDirectory=/home/kali
+
+# Load secrets
+EnvironmentFile=-/home/kali/.jarvis/config/secrets.env
+
+# Start OpenClaw gateway
+ExecStart=/usr/bin/node /home/kali/.npm-global/lib/node_modules/openclaw/openclaw.mjs gateway
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=30%
+
+[Install]
+WantedBy=multi-user.target

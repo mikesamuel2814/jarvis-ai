@@ -7,7 +7,8 @@ venv/
 
 # Jarvis runtime data — never commit
 data/
-memory/
+memory/*.sqlite3
+memory/*/
 logs/
 models/
 training/
@@ -21,3 +22,10 @@ config/telegram.json
 *.swp
 .vscode/
 .idea/
+
+# Jarvis 2.0 — never commit secrets or generated data
+config/secrets.env
+*.env
+scans/
+data/golden_examples.jsonl
+data/*.jsonl

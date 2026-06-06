@@ -61,6 +61,8 @@ def get_audio_bytes(text: str) -> bytes | None:
 
 def speak_local(text: str):
     """Play TTS on local speakers (non-blocking). Uses mpg123."""
+    import os as _os
+
     def _play():
         audio = get_audio_bytes(text)
         if not audio:
@@ -69,11 +71,31 @@ def speak_local(text: str):
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp.write(audio)
                 tmp_path = tmp.name
-            # Try pulse variant first (XFCE desktop), then plain mpg123
-            for player in ["/usr/bin/mpg123-pulse", "/usr/bin/mpg123"]:
-                if Path(player).exists():
-                    subprocess.run([player, "-q", tmp_path], timeout=60)
-                    break
+
+            # Build an env with PulseAudio/PipeWire socket hints so the service
+            # context can reach the user's sound server.
+            env = dict(_os.environ)
+            uid = _os.getuid()
+            env.setdefault("PULSE_RUNTIME_PATH", f"/run/user/{uid}/pulse")
+            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+
+            played = False
+            # mpg123 with explicit -o pulse (works even when mpg123-pulse wrapper fails)
+            if Path("/usr/bin/mpg123").exists():
+                for output in ("pulse", "alsa"):
+                    r = subprocess.run(
+                        ["/usr/bin/mpg123", "-o", output, "-q", tmp_path],
+                        timeout=60,
+                        env=env,
+                        capture_output=True,
+                    )
+                    if r.returncode == 0:
+                        played = True
+                        break
+            if not played:
+                # last-resort: let mpg123 auto-detect
+                subprocess.run(["/usr/bin/mpg123", "-q", tmp_path],
+                               timeout=60, env=env, capture_output=True)
             Path(tmp_path).unlink(missing_ok=True)
         except Exception:
             pass

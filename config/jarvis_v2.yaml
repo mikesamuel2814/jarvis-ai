@@ -1,0 +1,113 @@
+# Jarvis 2.0 Main Configuration
+# Extends jarvis.yaml — 2.0 adds Kimi + OpenClaw + 3-tier routing
+
+version: "2.0.0"
+
+# ── Paths ─────────────────────────────────────────────────────────
+paths:
+  jarvis_home: "~/.jarvis"          # Resolved via Path.home() in code
+  memory: "~/.jarvis/memory"
+  data: "~/.jarvis/data"
+  logs: "~/.jarvis/logs"
+  config: "~/.jarvis/config"
+  openclaw_workspace: "~/.openclaw/workspace"
+  openclaw_config: "~/.openclaw/openclaw.json"
+  skills_dir: "~/.openclaw/workspace/skills"
+
+# ── Local Ollama Models ───────────────────────────────────────────
+ollama:
+  host: "http://localhost:11434"
+  models:
+    chat: "phi4-mini"
+    code: "qwen2.5-coder:7b"
+    reasoning: "deepseek-r1:7b"
+    vision: "llava:7b"
+    embedding: "mxbai-embed-large"
+  options:
+    num_ctx: 2048        # 6GB VRAM ceiling — do NOT raise until hardware upgrade
+    num_keep: 256
+    num_predict: 1024
+    temperature: 0.3
+  # Semaphore: only 1 model loaded at a time (6GB VRAM)
+  max_loaded_models: 1
+
+# ── ChromaDB Memory ───────────────────────────────────────────────
+memory:
+  path: "~/.jarvis/memory"
+  collection: "jarvis_memory"
+  embedding_model: "mxbai-embed-large"
+  chunk_size: 800
+  chunk_overlap: 100
+  distance_threshold: 0.55
+  retrieval_count: 8
+  # Metadata field for OpenClaw sync tracking
+  sync_status_field: "oc_sync_status"
+
+# ── API Server ────────────────────────────────────────────────────
+api:
+  # NEVER bind to 0.0.0.0 — use 127.0.0.1 or Tailscale interface
+  host: "127.0.0.1"
+  port: 8181
+  # Set JARVIS_API_KEY env var — required for /action/* and /webhook/* endpoints
+  require_api_key: true
+  # Shared secret for HMAC verification of OpenClaw webhooks
+  # Set JARVIS_WEBHOOK_SECRET env var
+  webhook_hmac_header: "X-Openclaw-Signature"
+
+# ── 3-Tier Brain ──────────────────────────────────────────────────
+brain:
+  enabled: true
+  routing_rules: "~/.jarvis/config/routing_rules.yaml"
+  # Log every routing decision for accuracy tracking
+  log_routing_decisions: true
+  routing_log: "~/.jarvis/data/routing_decisions.jsonl"
+
+# ── Learning ──────────────────────────────────────────────────────
+learning:
+  queue_file: "~/.jarvis/data/learning_queue.jsonl"
+  golden_file: "~/.jarvis/data/golden_examples.jsonl"
+  lessons_file: "~/.jarvis/data/lessons.jsonl"
+  corrections_file: "~/.jarvis/data/corrections.jsonl"
+  # Trigger immediate training when queue exceeds this
+  queue_trigger_threshold: 10
+  # Only queue high-value interactions (Cloud tier, >200 response tokens)
+  queue_min_tier: "cloud"
+  queue_min_response_chars: 400
+
+# ── OpenClaw Integration ──────────────────────────────────────────
+openclaw:
+  enabled: true
+  gateway_url: "http://127.0.0.1:18789"
+  # Jarvis receives OpenClaw events at this path
+  webhook_path: "/webhook/openclaw"
+  # Skills published to OpenClaw workspace
+  skills_publish_dir: "~/.openclaw/workspace/skills/jarvis-system"
+  heartbeat_checklist: "~/.jarvis/openclaw_config/HEARTBEAT.md"
+
+# ── Cursor IDE Bridge ─────────────────────────────────────────────
+cursor:
+  enabled: true
+  # Paths to watch for Cursor session files
+  watch_paths:
+    - "~/.cursor/logs"
+    - "~/.config/Cursor/logs"
+  # Enrich sessions with Kimi cloud analysis
+  kimi_enrichment: true
+  # Only enrich sessions over this size (chars)
+  min_session_chars: 500
+  # Log enriched sessions
+  enrichment_log: "~/.jarvis/data/cursor_enriched.jsonl"
+
+# ── Monitoring ────────────────────────────────────────────────────
+monitor:
+  # CPU/RAM/Disk/GPU thresholds (same as 1.0)
+  cpu_alert: 85
+  cpu_critical: 88
+  ram_alert: 85
+  ram_critical: 90
+  disk_alert: 90
+  disk_critical: 92
+  gpu_temp_alert: 85
+  # Do NOT duplicate OpenClaw heartbeat checks here
+  # OpenClaw handles: project git status, VPS PM2, learning queue
+  # Monitor handles: local hardware, services, log rotation

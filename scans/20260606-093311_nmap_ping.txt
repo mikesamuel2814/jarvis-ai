@@ -1,0 +1,4 @@
+Starting Nmap 7.99 ( https://nmap.org ) at 2026-06-06 09:33 +0600
+Nmap scan report for localhost (127.0.0.1)
+Host is up.
+Nmap done: 1 IP address (1 host up) scanned in 0.00 seconds

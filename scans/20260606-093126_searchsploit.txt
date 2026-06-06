@@ -1,0 +1,300 @@
+---------------------------------------------- ---------------------------------
+ Exploit Title                                |  Path
+---------------------------------------------- ---------------------------------
+[01;31m[KApache[m[K (Windows x86) - Chunked Encoding (Meta | windows_x86/remote/16782.rb
+[01;31m[KApache[m[K + PHP < 5.3.12 / < 5.4.2 - cgi-bin Rem | php/remote/29290.c
+[01;31m[KApache[m[K + PHP < 5.3.12 / < 5.4.2 - Remote Code | php/remote/29316.py
+[01;31m[KApache[m[K - Arbitrary Long HTTP Headers (Denial  | multiple/dos/360.pl
+[01;31m[KApache[m[K - Arbitrary Long HTTP Headers Denial o | linux/dos/371.c
+[01;31m[KApache[m[K - Denial of Service                    | linux/dos/18221.c
+[01;31m[KApache[m[K - httpOnly Cookie Disclosure           | multiple/remote/18442.html
+[01;31m[KApache[m[K - Remote Memory Exhaustion (Denial of  | multiple/dos/17696.pl
+[01;31m[KApache[m[K 0.8.x/1.0.x / NCSA HTTPd 1.x - 'test-c | cgi/remote/20435.txt
+[01;31m[KApache[m[K 1.0/1.2/1.3 - Server Address Disclosur | multiple/remote/21067.c
+[01;31m[KApache[m[K 1.1 / NCSA HTTPd 1.5.2 / Netscape Serv | multiple/dos/19536.txt
+[01;31m[KApache[m[K 1.2 - Denial of Service                | multiple/dos/20558.txt
+[01;31m[KApache[m[K 1.2.5/1.3.1 / UnityMail 2.0 - MIME Hea | windows/dos/20272.pl
+[01;31m[KApache[m[K 1.3 + PHP 3 - File Disclosure          | multiple/remote/20466.txt
+[01;31m[KApache[m[K 1.3 - Artificially Long Slash Path Dir | multiple/remote/20692.pl
+[01;31m[KApache[m[K 1.3 - Artificially Long Slash Path Dir | multiple/remote/20693.c
+[01;31m[KApache[m[K 1.3 - Artificially Long Slash Path Dir | multiple/remote/20694.pl
+[01;31m[KApache[m[K 1.3 - Artificially Long Slash Path Dir | multiple/remote/20695.pl
+[01;31m[KApache[m[K 1.3 - Directory Index Disclosure       | multiple/remote/21002.txt
+[01;31m[KApache[m[K 1.3.12 - WebDAV Directory Listings     | linux/remote/20210.txt
+[01;31m[KApache[m[K 1.3.14 - Mac File Protection Bypass    | osx/remote/20911.txt
+[01;31m[KApache[m[K 1.3.20 (Win32) - 'PHP.exe' Remote File | windows/remote/21204.txt
+[01;31m[KApache[m[K 1.3.31 mod_include - Local Buffer Over | linux/local/587.c
+[01;31m[KApache[m[K 1.3.34/1.3.33 (Ubuntu / Debian) - CGI  | linux/local/3384.c
+[01;31m[KApache[m[K 1.3.35/2.0.58/2.2.2 - Arbitrary HTTP R | linux/remote/28424.txt
+[01;31m[KApache[m[K 1.3.6/1.3.9/1.3.11/1.3.12/1.3.20 - Roo | windows/remote/19975.pl
+[01;31m[KApache[m[K 1.3.x + Tomcat 4.0.x/4.1.x mod_jk - Ch | unix/dos/22068.pl
+[01;31m[KApache[m[K 1.3.x - HTDigest Realm Command Line Ar | unix/remote/25624.c
+[01;31m[KApache[m[K 1.3.x - HTDigest Realm Command Line Ar | unix/remote/25625.c
+[01;31m[KApache[m[K 1.3.x < 2.0.48 mod_userdir - Remote Us | linux/remote/132.c
+[01;31m[KApache[m[K 1.3.x mod_include - Local Buffer Overf | linux/local/24694.c
+[01;31m[KApache[m[K 1.3.x mod_mylo - Remote Code Execution | multiple/remote/67.c
+[01;31m[KApache[m[K 1.3/2.0.x - Server Side Include Cross- | multiple/remote/21885.txt
+[01;31m[KApache[m[K 1.4/2.2.x - APR 'apr_fnmatch()' Denial | linux/dos/35738.php
+[01;31m[KApache[m[K 1.x/2.0.x - Chunked-Encoding Memory Co | multiple/remote/21559.c
+[01;31m[KApache[m[K 1.x/2.0.x - Chunked-Encoding Memory Co | multiple/remote/21560.c
+[01;31m[KApache[m[K 2.0 - Encoded Backslash Directory Trav | windows/remote/21697.txt
+[01;31m[KApache[m[K 2.0 - Full Path Disclosure             | windows/remote/21719.txt
+[01;31m[KApache[m[K 2.0 mod_jk2 2.0.2 (Windows x86) - Remo | windows_x86/remote/5330.c
+[01;31m[KApache[m[K 2.0.39/40 - Oversized STDERR Buffer De | linux/dos/21854.c
+[01;31m[KApache[m[K 2.0.44 (Linux) - Remote Denial of Serv | linux/dos/11.c
+[01;31m[KApache[m[K 2.0.45 - 'APR' Crash                   | linux/dos/38.pl
+[01;31m[KApache[m[K 2.0.49 - Arbitrary Long HTTP Headers D | multiple/dos/1056.pl
+[01;31m[KApache[m[K 2.0.4x mod_perl - File Descriptor Leak | linux/local/23581.pl
+[01;31m[KApache[m[K 2.0.4x mod_php - File Descriptor Leaka | linux/local/23481.c
+[01;31m[KApache[m[K 2.0.4x mod_php - File Descriptor Leaka | linux/local/23482.c
+[01;31m[KApache[m[K 2.0.52 - GET Denial of Service         | multiple/dos/855.pl
+[01;31m[KApache[m[K 2.0.58 mod_rewrite (Windows 2003) - Re | windows/remote/3996.c
+[01;31m[KApache[m[K 2.2 (Windows) - Local Denial of Servic | windows/dos/15319.pl
+[01;31m[KApache[m[K 2.2 - Scoreboard Invalid Free On Shutd | linux/dos/41768.txt
+[01;31m[KApache[m[K 2.2.14 mod_isapi - Dangling Pointer Re | windows/remote/11650.c
+[01;31m[KApache[m[K 2.2.15 mod_proxy - Reverse Proxy Secur | linux/remote/36663.txt
+[01;31m[KApache[m[K 2.2.2 - CGI Script Source Code Informa | multiple/remote/28365.txt
+[01;31m[KApache[m[K 2.2.4 - 413 Error HTTP Request Method  | unix/remote/30835.sh
+[01;31m[KApache[m[K 2.2.6 (Windows) - Share PHP File Exten | windows/remote/30901.txt
+[01;31m[KApache[m[K 2.2.6 mod_negotiation - HTML Injection | linux/remote/31052.java
+[01;31m[KApache[m[K 2.4.17 - Denial of Service             | windows/dos/39037.php
+[01;31m[KApache[m[K 2.4.17 < 2.4.38 - '[01;31m[Kapache[m[K2ctl graceful | linux/local/46676.php
+[01;31m[KApache[m[K 2.4.23 mod_http2 - Denial of Service   | linux/dos/40909.py
+[01;31m[KApache[m[K 2.4.7 + PHP 7.0.2 - 'openssl_seal()' U | php/remote/40142.php
+[01;31m[KApache[m[K 2.4.7 mod_status - Scoreboard Handling | linux/dos/34133.txt
+[01;31m[KApache[m[K 2.4.x - Buffer Overflow                | multiple/webapps/51193.py
+[01;31m[KApache[m[K 2.x - Memory Leak                      | windows/dos/9.c
+[01;31m[KApache[m[K 7.0.x mod_proxy - Reverse Proxy Securi | linux/remote/36352.txt
+[01;31m[KApache[m[K < 1.3.37/2.0.59/2.2.3 mod_rewrite - Re | multiple/remote/2237.sh
+[01;31m[KApache[m[K < 2.0.64 / < 2.2.21 mod_setenvif - Int | linux/dos/41769.txt
+[01;31m[KApache[m[K < 2.2.34 / < 2.4.27 - OPTIONS Memory L | linux/webapps/42745.py
+[01;31m[KApache[m[K ActiveMQ 5.11.1/5.13.2 - Directory Tra | windows/remote/40857.txt
+[01;31m[KApache[m[K ActiveMQ 5.2/5.3 - Source Code Informa | multiple/remote/33868.txt
+[01;31m[KApache[m[K ActiveMQ 5.3 - 'admin/queueBrowse' Cro | multiple/remote/33905.txt
+[01;31m[KApache[m[K ActiveMQ 5.x-5.11.1 - Directory Traver | windows/remote/48181.rb
+[01;31m[KApache[m[K ActiveMQ 6.1.6 - Denial of Service (DO | multiple/remote/52288.py
+[01;31m[KApache[m[K Airflow 1.10.10 - 'Example Dag' Remote | multiple/webapps/49927.py
+[01;31m[KApache[m[K APISIX 2.12.1 - Remote Code Execution  | multiple/remote/50829.py
+[01;31m[KApache[m[K APR - Hash Collision Denial of Service | linux/dos/36669.txt
+[01;31m[KApache[m[K Archiva 1.0 < 1.3.1 - Cross-Site Reque | multiple/webapps/15710.txt
+[01;31m[KApache[m[K Archiva 1.3.9 - Multiple Cross-Site Re | xml/webapps/40109.txt
+[01;31m[KApache[m[K AXIS 1.0 - Non-Existent WSDL Path Info | multiple/remote/29930.txt
+[01;31m[KApache[m[K Axis 1.4 - Remote Code Execution       | multiple/remote/46682.py
+[01;31m[KApache[m[K Axis2 1.4.1 - Local File Inclusion     | php/webapps/12721.txt
+[01;31m[KApache[m[K Axis2 1.x - '/axis2/axis2-admin' Sessi | multiple/remote/34186.txt
+[01;31m[KApache[m[K Axis2 Administration Console - (Authen | multiple/webapps/12689.txt
+[01;31m[KApache[m[K cocoon 2.14/2.2 - Directory Traversal  | multiple/remote/23282.txt
+[01;31m[KApache[m[K Commons FileUpload and [01;31m[KApache[m[K Tomcat - | multiple/dos/31615.rb
+[01;31m[KApache[m[K Commons Text  1.10.0 - Remote Code Exe | multiple/webapps/52261.py
+[01;31m[KApache[m[K Continuum - Arbitrary Command Executio | linux/remote/39945.rb
+[01;31m[KApache[m[K Continuum 1.4.2 - Multiple Vulnerabili | java/webapps/39886.txt
+[01;31m[KApache[m[K CouchDB - Arbitrary Command Execution  | linux/remote/45019.rb
+[01;31m[KApache[m[K CouchDB 1.5.0 - 'uuids' Denial of Serv | multiple/dos/32519.txt
+[01;31m[KApache[m[K CouchDB 1.7.0 / 2.x < 2.1.1 - Remote P | linux/webapps/44498.py
+[01;31m[KApache[m[K CouchDB 2.0.0 - Local Privilege Escala | windows/local/40865.txt
+[01;31m[KApache[m[K CouchDB 2.3.0 - Cross-Site Scripting   | multiple/webapps/46406.txt
+[01;31m[KApache[m[K CouchDB 2.3.1 - Cross-Site Request For | multiple/webapps/46595.txt
+[01;31m[KApache[m[K CouchDB 3.2.1 - Remote Code Execution  | linux/remote/50914.py
+[01;31m[KApache[m[K CouchDB < 2.1.0 - Remote Code Executio | linux/webapps/44913.py
+[01;31m[KApache[m[K CXF < 2.5.10/2.6.7/2.7.4 - Denial of S | multiple/dos/26710.txt
+[01;31m[KApache[m[K Cygwin 1.3.x/2.0.x - Directory Travers | windows/remote/23751.txt
+[01;31m[KApache[m[K Flink 1.11.0 - Unauthenticated Arbitra | java/webapps/49398.rb
+[01;31m[KApache[m[K Flink 1.9.x - File Upload RCE (Unauthe | java/webapps/48978.py
+[01;31m[KApache[m[K Geronimo 1.0 - Error Page Cross-Site S | multiple/remote/27096.txt
+[01;31m[KApache[m[K Geronimo 2.1.3 - Multiple Directory Tr | multiple/remote/8458.txt
+[01;31m[KApache[m[K Geronimo 2.1.x - '/console/portal/' UR | multiple/remote/32921.txt
+[01;31m[KApache[m[K Geronimo 2.1.x - '/console/portal/Serv | multiple/remote/32920.txt
+[01;31m[KApache[m[K Geronimo 2.1.x - Cross-Site Request Fo | multiple/remote/32922.html
+[01;31m[KApache[m[K HertzBeat 1.8.0 - Remote Code Executio | multiple/webapps/52563.txt
+[01;31m[KApache[m[K HTTP Server 2.4.49 - Path Traversal &  | multiple/webapps/50383.sh
+[01;31m[KApache[m[K HTTP Server 2.4.50 - Path Traversal &  | multiple/webapps/50406.sh
+[01;31m[KApache[m[K HTTP Server 2.4.50 - Remote Code Execu | multiple/webapps/50446.sh
+[01;31m[KApache[m[K HTTP Server 2.4.50 - Remote Code Execu | multiple/webapps/50512.py
+[01;31m[KApache[m[K Httpd mod_proxy - Error Page Cross-Sit | multiple/webapps/47688.md
+[01;31m[KApache[m[K Httpd mod_rewrite - Open Redirects     | multiple/webapps/47689.md
+[01;31m[KApache[m[K HugeGraph Server 1.2.0 - Remote Code E | java/webapps/52149.py
+[01;31m[KApache[m[K JackRabbit - WebDAV XML External Entit | java/webapps/37110.py
+[01;31m[KApache[m[K JackRabbit 1.4/1.5 Content Repository  | jsp/webapps/32741.txt
+[01;31m[KApache[m[K JackRabbit 1.4/1.5 Content Repository  | jsp/webapps/32742.txt
+[01;31m[KApache[m[K JackRabbit 2.0.0 - webapp XPath Inject | jsp/webapps/14617.txt
+[01;31m[KApache[m[K James Server 2.2 - SMTP Denial of Serv | multiple/dos/27915.pl
+[01;31m[KApache[m[K James Server 2.3.2 - Insecure User Cre | linux/remote/48130.rb
+[01;31m[KApache[m[K James Server 2.3.2 - Remote Command Ex | linux/remote/35513.py
+[01;31m[KApache[m[K James Server 2.3.2 - Remote Command Ex | linux/remote/50347.py
+[01;31m[KApache[m[K Jetspeed - Arbitrary File Upload (Meta | java/remote/39643.rb
+[01;31m[KApache[m[K Libcloud Digital Ocean API - Local Inf | linux/local/38937.txt
+[01;31m[KApache[m[K Log4j 2 - Remote Code Execution (RCE)  | java/remote/50592.py
+[01;31m[KApache[m[K Log4j2 2.14.1 - Information Disclosure | java/remote/50590.py
+[01;31m[KApache[m[K Mina 2.0.13 - Remote Command Execution | multiple/remote/40382.txt
+[01;31m[KApache[m[K Mod_Access_Referer 1.0.2 - Null Pointe | multiple/dos/22505.txt
+[01;31m[KApache[m[K Mod_Auth_OpenID - Session Stealing     | linux/local/18917.txt
+[01;31m[KApache[m[K mod_cgi - 'Shellshock' Remote Command  | linux/remote/34900.py
+[01;31m[KApache[m[K mod_dav / svn - Remote Denial of Servi | multiple/dos/8842.pl
+[01;31m[KApache[m[K mod_gzip (with debug_mode) 1.2.26.1a - | linux/remote/126.c
+[01;31m[KApache[m[K mod_jk 1.2.19 (Windows x86) - Remote B | windows_x86/remote/6100.py
+[01;31m[KApache[m[K mod_jk 1.2.19/1.2.20 - Remote Buffer O | multiple/remote/4093.pl
+[01;31m[KApache[m[K mod_perl - '[01;31m[KApache[m[K::Status' / '[01;31m[KApache[m[K2 | multiple/remote/9993.txt
+[01;31m[KApache[m[K mod_proxy - Reverse Proxy Exposure     | multiple/remote/17969.py
+[01;31m[KApache[m[K mod_proxy_cluster 1.2.6 - Stored XSS   | php/webapps/52010.py
+[01;31m[KApache[m[K mod_rewrite (Windows x86) - Off-by-One | windows_x86/remote/3680.sh
+[01;31m[KApache[m[K mod_rewrite - LDAP protocol Buffer Ove | windows/remote/16752.rb
+[01;31m[KApache[m[K mod_session_crypto - Padding Oracle    | multiple/webapps/40961.py
+[01;31m[KApache[m[K mod_ssl 2.0.x - Remote Denial of Servi | linux/dos/24590.txt
+[01;31m[KApache[m[K mod_ssl 2.8.x - Off-by-One HTAccess Bu | multiple/dos/21575.txt
+[01;31m[KApache[m[K mod_ssl < 2.8.7 OpenSSL - 'OpenFuck.c' | unix/remote/21671.c
+[01;31m[KApache[m[K mod_ssl < 2.8.7 OpenSSL - 'OpenFuckV2. | unix/remote/47080.c
+[01;31m[KApache[m[K mod_ssl < 2.8.7 OpenSSL - 'OpenFuckV2. | unix/remote/764.c
+[01;31m[KApache[m[K mod_ssl OpenSSL < 0.9.6d / < 0.9.7-bet | unix/remote/40347.txt
+[01;31m[KApache[m[K mod_wsgi - Information Disclosure      | linux/remote/39196.py
+[01;31m[KApache[m[K MyFaces - 'ln' Information Disclosure  | multiple/remote/36681.txt
+[01;31m[KApache[m[K MyFaces Tomahawk JSF Framework 1.1.5 - | jsp/webapps/30191.txt
+[01;31m[KApache[m[K OFBiz - Admin Creator                  | multiple/remote/12264.txt
+[01;31m[KApache[m[K OFBiz - Multiple Cross-Site Scripting  | php/webapps/12330.txt
+[01;31m[KApache[m[K OFBiz - Remote Execution (via SQL Exec | multiple/remote/12263.txt
+[01;31m[KApache[m[K OFBiz 10.4.x - Multiple Cross-Site Scr | multiple/remote/38230.txt
+[01;31m[KApache[m[K OFBiz 16.11.04 - XML External Entity I | java/webapps/45673.py
+[01;31m[KApache[m[K OFBiz 16.11.05 - Cross-Site Scripting  | multiple/webapps/45975.txt
+[01;31m[KApache[m[K OFBiz 17.12.03 - Cross-Site Request Fo | java/webapps/48408.txt
+[01;31m[KApache[m[K OFBiz 18.12.12 - Directory Traversal   | java/webapps/52020.txt
+[01;31m[KApache[m[K Olingo OData 4.0 - XML External Entity | java/webapps/47770.txt
+[01;31m[KApache[m[K OpenMeetings 1.9.x < 3.1.0 - '.ZIP' Fi | linux/webapps/39642.txt
+[01;31m[KApache[m[K OpenMeetings 5.0.0 - 'hostname' Denial | multiple/webapps/49094.txt
+[01;31m[KApache[m[K Pluto 3.0.0 / 3.0.1 - Persistent Cross | java/webapps/46759.txt
+[01;31m[KApache[m[K Portals Pluto 3.0.0 - Remote Code Exec | windows/webapps/45396.txt
+[01;31m[KApache[m[K Rave 0.11 < 0.20 - User Information Di | multiple/webapps/24744.txt
+[01;31m[KApache[m[K Roller - OGNL Injection (Metasploit)   | java/remote/29859.rb
+[01;31m[KApache[m[K Roller 5.0.3 - XML External Entity Inj | linux/webapps/45341.py
+[01;31m[KApache[m[K Shindig - XML External Entity Informat | multiple/remote/38813.txt
+[01;31m[KApache[m[K Shiro - Directory Traversal            | multiple/remote/34952.txt
+[01;31m[KApache[m[K Shiro 1.2.4 - Cookie RememberME Deseri | multiple/remote/48410.rb
+[01;31m[KApache[m[K Sling - Denial of Service              | multiple/dos/37487.txt
+[01;31m[KApache[m[K Sling Framework (Adobe AEM) 2.3.6 - In | multiple/webapps/39435.txt
+[01;31m[KApache[m[K Solr - Remote Code Execution via Veloc | multiple/remote/48338.rb
+[01;31m[KApache[m[K Solr 7.0.1 - XML External Entity Expan | xml/webapps/43009.txt
+[01;31m[KApache[m[K Solr 8.2.0 - Remote Code Execution     | java/webapps/47572.py
+[01;31m[KApache[m[K SpamAssassin Milter Plugin 0.3.1 - Rem | multiple/remote/11662.txt
+[01;31m[KApache[m[K Spark - (Unauthenticated) Command Exec | java/remote/45925.rb
+[01;31m[KApache[m[K Spark Cluster 1.3.x - Arbitrary Code E | linux/remote/36562.txt
+[01;31m[KApache[m[K Struts - 'ParametersInterceptor' Remot | multiple/remote/24874.rb
+[01;31m[KApache[m[K Struts - ClassLoader Manipulation Remo | multiple/remote/33142.rb
+[01;31m[KApache[m[K Struts - Developer Mode OGNL Execution | java/remote/31434.rb
+[01;31m[KApache[m[K Struts - Dynamic Method Invocation Rem | linux/remote/39756.rb
+[01;31m[KApache[m[K Struts - includeParams Remote Code Exe | multiple/remote/25980.rb
+[01;31m[KApache[m[K Struts - Multiple Persistent Cross-Sit | multiple/webapps/18452.txt
+[01;31m[KApache[m[K Struts - OGNL Expression Injection     | multiple/remote/38549.txt
+[01;31m[KApache[m[K Struts - REST Plugin With Dynamic Meth | multiple/remote/39919.rb
+[01;31m[KApache[m[K Struts - REST Plugin With Dynamic Meth | multiple/remote/43382.py
+[01;31m[KApache[m[K Struts 1.2.7 - Error Response Cross-Si | multiple/remote/26542.txt
+[01;31m[KApache[m[K Struts 2 - DefaultActionMapper Prefixe | java/webapps/48917.py
+[01;31m[KApache[m[K Struts 2 - DefaultActionMapper Prefixe | multiple/remote/27135.rb
+[01;31m[KApache[m[K Struts 2 - Namespace Redirect OGNL Inj | multiple/remote/45367.rb
+[01;31m[KApache[m[K Struts 2 - Skill Name Remote Code Exec | multiple/remote/37647.txt
+[01;31m[KApache[m[K Struts 2 - Struts 1 Plugin Showcase OG | multiple/remote/44643.rb
+[01;31m[KApache[m[K Struts 2 < 2.3.1 - Multiple Vulnerabil | multiple/webapps/18329.txt
+[01;31m[KApache[m[K Struts 2.0 - 'XSLTResult.java' Arbitra | java/webapps/37009.xml
+[01;31m[KApache[m[K Struts 2.0.0 < 2.2.1.1 - XWork 's:subm | multiple/remote/35735.txt
+[01;31m[KApache[m[K Struts 2.0.1 < 2.3.33 / 2.5 < 2.5.10 - | multiple/remote/44556.py
+[01;31m[KApache[m[K Struts 2.0.9/2.1.8 - Session Tampering | multiple/remote/36426.txt
+[01;31m[KApache[m[K Struts 2.2.1.1 - Remote Command Execut | multiple/remote/18984.rb
+[01;31m[KApache[m[K Struts 2.2.3 - Multiple Open Redirecti | multiple/remote/38666.txt
+[01;31m[KApache[m[K Struts 2.3 < 2.3.34 / 2.5 < 2.5.16 - R | linux/remote/45260.py
+[01;31m[KApache[m[K Struts 2.3 < 2.3.34 / 2.5 < 2.5.16 - R | multiple/remote/45262.py
+[01;31m[KApache[m[K Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - | linux/webapps/41570.py
+[01;31m[KApache[m[K Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - | multiple/remote/41614.rb
+[01;31m[KApache[m[K Struts 2.3.x Showcase - Remote Code Ex | multiple/webapps/42324.py
+[01;31m[KApache[m[K Struts 2.5 < 2.5.12 - REST Plugin XStr | linux/remote/42627.py
+[01;31m[KApache[m[K Struts 2.5.20 - Double OGNL evaluation | multiple/remote/49068.py
+[01;31m[KApache[m[K Struts < 1.3.10 / < 2.3.16.2 - ClassLo | multiple/remote/41690.rb
+[01;31m[KApache[m[K Struts < 2.2.0 - Remote Command Execut | multiple/remote/17691.rb
+[01;31m[KApache[m[K Struts2 2.0.0 < 2.3.15 - Prefixed Para | multiple/webapps/44583.txt
+[01;31m[KApache[m[K Subversion - Remote Denial of Service  | linux/dos/38422.txt
+[01;31m[KApache[m[K Subversion 1.6.x - 'mod_dav_svn/lock.c | linux/dos/38421.txt
+[01;31m[KApache[m[K suEXEC - Information Disclosure / Priv | linux/remote/27397.txt
+[01;31m[KApache[m[K Superset 1.1.0 - Time-Based Account En | multiple/webapps/50072.py
+[01;31m[KApache[m[K Superset 2.0.0 - Authentication Bypass | multiple/webapps/51447.py
+[01;31m[KApache[m[K Superset < 0.23 - Remote Code Executio | linux/webapps/45933.py
+[01;31m[KApache[m[K Syncope 2.0.7 - Remote Code Execution  | windows/webapps/45400.txt
+[01;31m[KApache[m[K Tika 1.15 - 1.17 - Header Command Inje | windows/remote/47208.rb
+[01;31m[KApache[m[K Tika-server < 1.18 - Command Injection | windows/remote/46540.py
+[01;31m[KApache[m[K Tomcat (Windows) - 'runtime.getRuntime | windows/local/7264.txt
+[01;31m[KApache[m[K Tomcat - 'WebDAV' Remote File Disclosu | multiple/remote/4530.pl
+[01;31m[KApache[m[K Tomcat - Account Scanner / 'PUT' Reque | multiple/remote/18619.txt
+[01;31m[KApache[m[K Tomcat - AJP 'Ghostcat File Read/Inclu | multiple/webapps/48143.py
+[01;31m[KApache[m[K Tomcat - AJP 'Ghostcat' File Read/Incl | multiple/webapps/49039.rb
+[01;31m[KApache[m[K Tomcat - CGIServlet enableCmdLineArgum | windows/remote/47073.rb
+[01;31m[KApache[m[K Tomcat - Cookie Quote Handling Remote  | multiple/remote/9994.txt
+[01;31m[KApache[m[K Tomcat - Form Authentication 'Username | multiple/remote/9995.txt
+[01;31m[KApache[m[K Tomcat - WebDAV SSL Remote File Disclo | linux/remote/4552.pl
+[01;31m[KApache[m[K Tomcat / Geronimo 1.0 - 'Sample Script | multiple/remote/27095.txt
+[01;31m[KApache[m[K Tomcat 10.1 - Denial Of Service        | multiple/dos/51262.py
+[01;31m[KApache[m[K Tomcat 10.1.39 - Denial of Service (Do | multiple/remote/52318.py
+[01;31m[KApache[m[K Tomcat 11.0.3 - Remote Code Execution  | multiple/webapps/52134.txt
+[01;31m[KApache[m[K Tomcat 3.0 - Directory Traversal       | windows/remote/20716.txt
+[01;31m[KApache[m[K Tomcat 3.1 - Path Revealing            | multiple/remote/20131.txt
+[01;31m[KApache[m[K Tomcat 3.2 - 404 Error Page Cross-Site | multiple/remote/33379.txt
+[01;31m[KApache[m[K Tomcat 3.2 - Directory Disclosure      | unix/remote/21882.txt
+[01;31m[KApache[m[K Tomcat 3.2.1 - 404 Error Page Cross-Si | multiple/webapps/10292.txt
+[01;31m[KApache[m[K Tomcat 3.2.3/3.2.4 - 'RealPath.jsp' In | multiple/remote/21492.txt
+[01;31m[KApache[m[K Tomcat 3.2.3/3.2.4 - 'Source.jsp' Info | multiple/remote/21490.txt
+[01;31m[KApache[m[K Tomcat 3.2.3/3.2.4 - Example Files Web | multiple/remote/21491.txt
+[01;31m[KApache[m[K Tomcat 3.x - Null Byte Directory / Fil | linux/remote/22205.txt
+[01;31m[KApache[m[K Tomcat 3/4 - 'DefaultServlet' File Dis | unix/remote/21853.txt
+[01;31m[KApache[m[K Tomcat 3/4 - JSP Engine Denial of Serv | linux/dos/21534.jsp
+[01;31m[KApache[m[K Tomcat 4.0.3 - Denial of Service 'Devi | windows/webapps/21605.txt
+[01;31m[KApache[m[K Tomcat 4.0.3 - Requests Containing MS- | multiple/remote/31551.txt
+[01;31m[KApache[m[K Tomcat 4.0.3 - Servlet Mapping Cross-S | linux/remote/21604.txt
+[01;31m[KApache[m[K Tomcat 4.0.x - Non-HTTP Request Denial | linux/dos/23245.pl
+[01;31m[KApache[m[K Tomcat 4.0/4.1 - Servlet Full Path Dis | unix/remote/21412.txt
+[01;31m[KApache[m[K Tomcat 4.1 - JSP Request Cross-Site Sc | unix/remote/21734.txt
+[01;31m[KApache[m[K Tomcat 5 - Information Disclosure      | multiple/remote/28254.txt
+[01;31m[KApache[m[K Tomcat 5.5.0 < 5.5.29 / 6.0.0 < 6.0.26 | multiple/remote/12343.txt
+[01;31m[KApache[m[K Tomcat 5.5.15 - cal2.jsp Cross-Site Sc | jsp/webapps/30563.txt
+[01;31m[KApache[m[K Tomcat 5.5.25 - Cross-Site Request For | multiple/webapps/29435.txt
+[01;31m[KApache[m[K Tomcat 5.x/6.0.x - Directory Traversal | linux/remote/29739.txt
+[01;31m[KApache[m[K Tomcat 6.0.10 - Documentation Sample A | multiple/remote/30052.txt
+[01;31m[KApache[m[K Tomcat 6.0.13 - Host Manager Servlet C | multiple/remote/30495.html
+[01;31m[KApache[m[K Tomcat 6.0.13 - Insecure Cookie Handli | multiple/remote/30496.txt
+[01;31m[KApache[m[K Tomcat 6.0.13 - JSP Example Web Applic | jsp/webapps/30189.txt
+[01;31m[KApache[m[K Tomcat 6.0.15 - Cookie Quote Handling  | multiple/remote/31130.txt
+[01;31m[KApache[m[K Tomcat 6.0.16 - 'HttpServletResponse.s | multiple/remote/32138.txt
+[01;31m[KApache[m[K Tomcat 6.0.16 - 'RequestDispatcher' In | multiple/remote/32137.txt
+[01;31m[KApache[m[K Tomcat 6.0.18 - Form Authentication Ex | multiple/remote/33023.txt
+[01;31m[KApache[m[K Tomcat 6/7/8/9 - Information Disclosur | multiple/remote/41783.txt
+[01;31m[KApache[m[K Tomcat 7.0.4 - 'sort' / 'orderBy' Cros | linux/remote/35011.txt
+[01;31m[KApache[m[K Tomcat 8/7/6 (Debian-Based Distros) -  | linux/local/40450.txt
+[01;31m[KApache[m[K Tomcat 8/7/6 (RedHat Based Distros) -  | linux/local/40488.txt
+[01;31m[KApache[m[K Tomcat 9.0.0.M1 - Cross-Site Scripting | multiple/webapps/50119.txt
+[01;31m[KApache[m[K Tomcat 9.0.0.M1 - Open Redirect        | multiple/webapps/50118.txt
+[01;31m[KApache[m[K Tomcat < 5.5.17 - Remote Directory Lis | multiple/remote/2061.txt
+[01;31m[KApache[m[K Tomcat < 6.0.18 - 'utf8' Directory Tra | multiple/remote/6229.txt
+[01;31m[KApache[m[K Tomcat < 6.0.18 - 'utf8' Directory Tra | unix/remote/14489.c
+[01;31m[KApache[m[K Tomcat < 9.0.1 (Beta) / < 8.5.23 / < 8 | jsp/webapps/42966.py
+[01;31m[KApache[m[K Tomcat < 9.0.1 (Beta) / < 8.5.23 / < 8 | windows/webapps/42953.txt
+[01;31m[KApache[m[K Tomcat Connector jk2-2.0.2 mod_jk2 - R | linux/remote/5386.txt
+[01;31m[KApache[m[K Tomcat Connector mod_jk - 'exec-shield | linux/remote/4162.c
+[01;31m[KApache[m[K Tomcat Manager - Application Deployer  | multiple/remote/16317.rb
+[01;31m[KApache[m[K Tomcat Manager - Application Upload (A | multiple/remote/31433.rb
+[01;31m[KApache[m[K Tomcat mod_jk 1.2.20 - Remote Buffer O | windows/remote/16798.rb
+[01;31m[KApache[m[K Tomcat/JBoss EJBInvokerServlet / JMXIn | php/remote/28713.php
+[01;31m[KApache[m[K UNO / LibreOffice Version: 6.1.2 / Ope | multiple/remote/46544.py
+[01;31m[KApache[m[K Web Server 2.0.x - MS-DOS Device Name  | linux/dos/22191.pl
+[01;31m[KApache[m[K Win32 1.3.x/2.0.x - Batch File Remote  | windows/remote/21350.pl
+[01;31m[KApache[m[K Xerces-C XML Parser < 3.1.2 - Denial o | linux/dos/36906.txt
+[01;31m[KApache[m[K2Triad 1.5.4 - Multiple Vulnerabilities | php/webapps/42520.txt
+[01;31m[KApache[m[K::Gallery 0.4/0.5/0.6 - Insecure File S | linux/local/23119.c
+[01;31m[KApache[m[KOfBiz 17.12.01 - Remote Command Executi | java/webapps/50178.sh
+AWStats 6.x - [01;31m[KApache[m[K Tomcat Configuration Fil | cgi/webapps/35035.txt
+Azure [01;31m[KApache[m[K Ambari 2302250400 - Spoofing     | multiple/remote/51546.py
+Bea Weblogic [01;31m[KApache[m[K Connector - Code Executio | windows/remote/6089.pl
+Cobalt RaQ 2.0/3.0 - [01;31m[KApache[m[K .htaccess Disclos | multiple/remote/19828.txt
+htpasswd [01;31m[KApache[m[K 1.3.31 - Local Overflow       | linux/local/466.pl
+Joomla! Component com_intuit - [01;31m[KApache[m[K Directo | php/webapps/10811.txt
+NCSA 1.3/1.4.x/1.5 / [01;31m[KApache[m[K HTTPd 0.8.11/0.8. | multiple/remote/20595.txt
+Oracle Java JDK/JRE < 1.8.0.131 / [01;31m[KApache[m[K Xerc | php/dos/44057.md
+Oracle Weblogic [01;31m[KApache[m[K Connector - POST Buffe | windows/remote/18897.rb
+PHP 5.4.3 - [01;31m[Kapache[m[K_request_headers Function B | windows/remote/19231.rb
+RedHat [01;31m[KApache[m[K 2.0.40 - Directory Index Defaul | linux/remote/23296.txt
+RedHat Linux 7.0 [01;31m[KApache[m[K - Remote Username Enu | linux/remote/21112.php
+Webfroot Shoutbox < 2.32 ([01;31m[KApache[m[K) - Local Fil | linux/remote/34.pl
+---------------------------------------------- ---------------------------------
+Shellcodes: No Results

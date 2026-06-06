@@ -1,0 +1,58 @@
+version: "3.9"
+
+# Jarvis 2.0 — Docker Compose (optional)
+# For local dev only. Production runs as systemd services.
+# Note: Kimi API and OpenClaw run OUTSIDE Docker (they need system access)
+
+networks:
+  jarvis-net:
+    driver: bridge
+
+services:
+  jarvis-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: jarvis-api-v2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8181:8181"    # Bind to localhost only
+    env_file:
+      - ../.env
+    environment:
+      - JARVIS_HOME=/data/jarvis
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ~/.jarvis:/data/jarvis
+      - ~/.zsh_history:/home/user/.zsh_history:ro
+      - ~/Projects:/home/user/Projects:ro
+    networks:
+      - jarvis-net
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8181/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  jarvis-telegram:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: jarvis-telegram-v2
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - JARVIS_HOME=/data/jarvis
+      - JARVIS_API_URL=http://jarvis-api:8181
+      - PYTHONUNBUFFERED=1
+    command: ["python3", "telegram_bot.py"]
+    volumes:
+      - ~/.jarvis:/data/jarvis
+    networks:
+      - jarvis-net
+    depends_on:
+      jarvis-api:
+        condition: service_healthy

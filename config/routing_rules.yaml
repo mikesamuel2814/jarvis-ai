@@ -1,0 +1,141 @@
+# Brain Tier Routing Rules
+# Auto-updated by selftrain_v2.py on Sunday 2 AM
+# Manual edits OK — reloaded on each query by brain.py
+#
+# Tier intent:
+#   EDGE   = casual chat, greetings, instant sysinfo/status, trivial one-liners (local Ollama, free)
+#   CURSOR = concrete code/ops ON Mike's projects (fix, refactor, review, implement, deploy, debug)
+#   CLOUD  = open-ended reasoning, analysis, "why/how/explain", architecture, multi-step planning
+#   HYBRID = local pre-analysis -> Cloud; fallback for ambiguous non-code prose
+
+routing:
+  # ── EDGE (local Ollama) ─────────────────────────────────────────
+  # Evaluated FIRST to protect cost. Casual + instant facts only.
+  edge:
+    # Whole-word / phrase regex matches (not substring)
+    patterns:
+      - "^\\s*(hi|hey|hello|yo|sup|howdy)\\b"
+      - "\\bgood (morning|afternoon|evening|night)\\b"
+      - "\\bhow are you\\b"
+      - "\\bthank(s| you)\\b"
+      - "\\bgood (job|work)\\b"
+      - "\\bwell done\\b"
+      - "\\bdisk (space|usage|free)\\b"
+      - "\\bcpu (usage|load|temp)\\b"
+      - "\\bgpu (temp|usage|memory|vram)\\b"
+      - "\\bram (usage|free)\\b"
+      - "\\bmemory usage\\b"
+      - "\\buptime\\b"
+      - "\\bps aux\\b"
+      - "\\bwhat time\\b"
+      - "\\bwhat'?s the (time|date)\\b"
+      - "\\bping\\b"
+      - "\\brestart jarvis\\b"
+      - "\\bclear (history|context|memory)\\b"
+      - "\\b(start|stop|restart|status of) (jarvis|the bot|telegram)\\b"
+    # System/sysinfo nouns — combined with a sysinfo verb below -> instant Edge
+    sysinfo_keywords:
+      - "disk"
+      - "cpu"
+      - "ram"
+      - "memory"
+      - "vram"
+      - "uptime"
+      - "gpu"
+      - "temperature"
+      - "temp"
+      - "load"
+      - "processes"
+      - "services"
+      - "service status"
+    sysinfo_verbs:
+      - "check"
+      - "show"
+      - "what"
+      - "how much"
+      - "how many"
+      - "status"
+      - "usage"
+      - "free"
+      - "list"
+    # Short code questions under this char count (with a '?') -> Edge
+    code_char_limit: 120
+    # Explicit prefix overrides
+    prefixes: ["!local", "!edge", "!fast"]
+
+  # ── CURSOR (code-aware, live project context) ──────────────────
+  # Concrete engineering actions on Mike's actual code/ops.
+  cursor:
+    prefixes: ["!cursor", "!code"]
+    # Action verbs that operate on project code/infra
+    patterns:
+      - "\\b(refactor|rewrite|implement|write|add|create|build)\\b.*\\b(function|class|component|module|endpoint|api|route|test|hook|script|page|query)\\b"
+      - "\\bfix(es|ing)?\\b"
+      - "\\bdebug\\b"
+      - "\\b(null pointer|stack trace|traceback|exception|crash|throws?)\\b"
+      - "\\breview\\b.*\\b(code|logic|function|module|component|pr|pull request|implementation|reconnect|websocket|auth)\\b"
+      - "\\b(my|the|this)\\b.*\\b(code|function|class|component|module|endpoint|bug|logic|websocket|reconnect)\\b"
+      - "\\b(deploy|redeploy|rollback|restart pm2|pm2 restart)\\b"
+      - "\\b(merge conflict|git rebase|cherry-pick)\\b"
+      - "\\badd (a )?(test|tests|endpoint|route|migration)\\b"
+      - "\\b(typescript|react|node|express|fastapi|websocket) (error|bug|issue|component|hook)\\b"
+    # General code nouns — fallback signal for the cursor tier
+    keywords:
+      - "function"
+      - "class"
+      - "component"
+      - "endpoint"
+      - "module"
+      - "import"
+      - "migration"
+      - "webpack"
+      - "vite"
+      - "pnpm"
+      - "nginx config"
+      - "dockerfile"
+      - "lint"
+
+  # ── CLOUD (Claude — deep reasoning) ────────────────────────────
+  cloud:
+    patterns:
+      - "\\bwhy\\b"
+      - "\\bhow (does|do|come|would|should|can i)\\b"
+      - "\\banaly[sz]e\\b"
+      - "\\banaly[sz]is\\b"
+      - "\\bexplain\\b"
+      - "\\bcompare\\b"
+      - "\\bevaluate\\b"
+      - "\\bassess\\b"
+      - "\\bdiagnose\\b"
+      - "\\bdebug why\\b"
+      - "\\broot cause\\b"
+      - "\\barchitect(ure|ural)?\\b"
+      - "\\bdesign (a |the )?(system|pattern|schema|api|approach)\\b"
+      - "\\bdesign pattern\\b"
+      - "\\bsecurity (audit|review)\\b"
+      - "\\bperformance (review|analysis|tuning)\\b"
+      - "\\bcode review of\\b"
+      - "\\bplan\\b.*\\b(migration|rollout|refactor|upgrade|strategy)\\b"
+      - "\\bstrateg(y|ize)\\b"
+      - "\\btrade-?offs?\\b"
+      - "\\bpros and cons\\b"
+      - "\\bshould i\\b"
+      - "\\bbest (way|approach|practice)\\b"
+      - "\\bentire codebase\\b"
+      - "\\bfull project\\b"
+      - "\\bextract lesson\\b"
+      - "\\blong context\\b"
+    # History depth threshold — long conversations -> Cloud
+    history_depth_threshold: 20
+    prefixes: ["!cloud", "!kimi", "!claude", "!deep"]
+
+  # ── HYBRID (Local pre-analysis + Cloud reasoning) ──────────────
+  # Default for ambiguous non-code prose that isn't trivially Edge.
+  hybrid:
+    prefixes: ["!hybrid"]
+
+  # ── ACCURACY TRACKING ──────────────────────────────────────────
+  accuracy:
+    # Thresholds auto-updated by evolve_routing_rules()
+    edge_code_min_accuracy: 0.80
+    cloud_max_daily_cost_usd: 5.00

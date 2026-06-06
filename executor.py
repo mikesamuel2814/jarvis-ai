@@ -110,6 +110,34 @@ ACTIONS: dict[str, dict] = {
     "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo -n apt update && sudo -n apt upgrade -y",      "tier": APPROVE},
 }
 
+# ── Kali pentest tools (authorized security testing) ──────────────────────────
+# Merge KALI_TOOLS from kali_tools.py as `kali_<toolname>` actions. cmd=None
+# because execution goes through kali_tools.run_tool (scope-checked + sandboxed),
+# not the generic shell path. Lazy/guarded so executor still loads if the kali
+# modules are not ready yet (built in parallel by other agents).
+try:
+    import kali_tools as _kali_tools  # type: ignore
+    for _kt_name, _kt in _kali_tools.KALI_TOOLS.items():
+        ACTIONS[f"kali_{_kt_name}"] = {
+            "desc": _kt.get("desc", f"Kali tool {_kt_name}"),
+            "cmd": None,
+            "tier": _kt.get("tier", APPROVE),
+        }
+except Exception as _e:  # pragma: no cover - depends on parallel module
+    _kali_tools = None
+    try:
+        _audit_path = JARVIS_HOME / "logs" / "executor.log"
+        _audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_audit_path, "a") as _f:
+            _f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KALI_IMPORT skipped: {_e}\n")
+    except Exception:
+        pass
+
+try:
+    import kali_ai as _kali_ai  # type: ignore
+except Exception:
+    _kali_ai = None
+
 # ── Natural language → action name ────────────────────────────────────────────
 NL_MAP: list[tuple[list[str], str]] = [
     (["restart jarvis", "restart api", "restart the api"],                         "restart_jarvis"),
@@ -175,6 +203,19 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["vps git pull starline", "deploy starline"],                                "vps_git_pull_sl"),
     (["restart nginx", "nginx restart"],                                          "vps_restart_nginx"),
     (["restart syncer", "restart jarvis-sync", "restart sync"],                  "restart_jarvis_sync"),
+
+    # ── Kali pentest (authorized security testing) ────────────────────────────
+    (["port scan", "scan ports", "scan for open ports", "quick scan", "nmap quick"], "kali_nmap_quick"),
+    (["service scan", "service version scan", "detect services", "nmap service", "enumerate services"], "kali_nmap_service"),
+    (["web scan", "scan website", "scan web server", "nikto scan"],               "kali_nikto"),
+    (["find subdomains", "subdomain enum", "harvest emails", "osint"],            "kali_theharvester"),
+    (["whois", "whois lookup", "domain info"],                                    "kali_whois"),
+    (["vuln scan", "vulnerability scan", "nuclei scan", "scan for vulns"],        "kali_nuclei"),
+    (["dns enum", "dns lookup", "dig dns", "dns records"],                        "kali_dig"),
+    (["dir bust", "directory brute", "gobuster", "find directories", "dir scan"], "kali_gobuster_dir"),
+    (["host lookup", "resolve host"],                                             "kali_host"),
+    (["searchsploit", "search exploits", "find exploit"],                        "kali_searchsploit"),
+    (["whatweb", "fingerprint web", "web tech"],                                 "kali_whatweb"),
 ]
 
 # Regex patterns for commands that need arg extraction
@@ -237,9 +278,14 @@ def extract_action_arg(text: str, action: str) -> str:
     return ""
 
 
-def run_action(action_name: str, arg: str = "") -> dict:
-    """Execute an action. Returns {success, output, action, tier}."""
-    _audit(f"EXECUTE {action_name} arg={arg!r}")
+def run_action(action_name: str, arg: str = "", approved: bool = False) -> dict:
+    """Execute an action. Returns {success, output, action, tier}.
+
+    approved=True means a human already authorized this step (e.g. via a
+    task-level Telegram approval), so per-step escalation guards are bypassed —
+    the step executes directly instead of creating another pending request.
+    """
+    _audit(f"EXECUTE {action_name} arg={arg!r} approved={approved}")
     if action_name not in ACTIONS:
         return {"success": False, "output": f"Unknown action: {action_name}", "action": action_name}
 
@@ -265,6 +311,8 @@ def run_action(action_name: str, arg: str = "") -> dict:
             return _file_write(arg)
         if action_name == "project_status":
             return _project_status()
+        if action_name.startswith("kali_"):
+            return _run_kali(action_name, arg, approved=approved)
         if entry["cmd"]:
             cmd = entry["cmd"]
             if "{arg}" in cmd:
@@ -456,6 +504,116 @@ def _run_claude_task(task: str) -> dict:
     return {"success": True,
             "output": f"Claude task started in background. Results will be sent via Telegram.\nTask: {task[:200]}",
             "action": "claude_task"}
+
+
+def _run_kali(action_name: str, arg: str = "", approved: bool = False) -> dict:
+    """Execute a Kali pentest tool via kali_tools.run_tool (scope-checked).
+
+    arg format: 'target [opts...]' — first token is the target, the rest are
+    passed through as tool options. Output is summarised by kali_ai.interpret.
+
+    Scope/active escalation: kali_tools.effective_tier(tool, target) may return
+    'approve' even for a tool statically registered as 'auto' (e.g. out-of-scope
+    or active scanning). Because the API gates on the static tier, we re-check
+    here and BLOCK execution by returning a pending approval request when the
+    effective tier escalates to APPROVE. This keeps unauthorised/active scans
+    behind the explicit-approval flow.
+    """
+    if _kali_tools is None:
+        return {"success": False, "output": "Kali tools module not available.", "action": action_name}
+
+    tool = action_name[len("kali_"):]
+    parts = (arg or "").split()
+    target = parts[0] if parts else ""
+    opts = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+    # Re-evaluate the effective tier for this specific target.
+    try:
+        eff_tier = _kali_tools.effective_tier(tool, target)
+    except Exception as e:
+        _audit(f"KALI effective_tier error {tool}: {e}")
+        eff_tier = APPROVE
+
+    scope = {}
+    try:
+        scope = _kali_tools.validate_scope(target) if target else {"in_scope": True, "reason": "no target", "normalized": ""}
+    except Exception:
+        scope = {"in_scope": False, "reason": "scope check failed", "normalized": target}
+
+    static_tier = ACTIONS.get(action_name, {}).get("tier", APPROVE)
+
+    # Escalation guard: if effective tier is APPROVE but this came through the
+    # auto-gated path (static tier auto/confirm), require explicit approval.
+    # Skipped when approved=True — a task-level approval already authorized this.
+    if eff_tier == APPROVE and static_tier != APPROVE and not approved:
+        try:
+            from permissions import create_request
+            banner = ""
+            if not scope.get("in_scope", True):
+                banner = f"⚠️ OUT OF SCOPE — {scope.get('reason','')}"
+            desc = f"Kali {tool} on {target or '(no target)'}".strip()
+            if banner:
+                desc = f"{banner} | {desc}"
+            req = create_request(action=action_name, description=desc, tier=APPROVE, arg=arg)
+            _audit(f"KALI ESCALATE {action_name} target={target!r} -> approval {req['id']}")
+            return {
+                "success": True,
+                "status": "pending",
+                "request_id": req["id"],
+                "tier": APPROVE,
+                "in_scope": scope.get("in_scope", True),
+                "output": (
+                    f"{banner}\n" if banner else ""
+                ) + f"🔐 Approval required for kali {tool} on `{target}`.\n"
+                    f"Reply /approve {req['id']} or /deny {req['id']}",
+                "action": action_name,
+            }
+        except Exception as e:
+            _audit(f"KALI ESCALATE create_request failed {action_name}: {e}")
+            # Fall through to run_tool which itself enforces scope/tier.
+
+    _audit(f"KALI RUN {action_name} target={target!r} opts={opts!r} tier={eff_tier}")
+    try:
+        res = _kali_tools.run_tool(tool, target, opts)
+    except Exception as e:
+        _audit(f"KALI ERROR {action_name}: {e}")
+        return {"success": False, "output": f"Kali tool error: {e}", "action": action_name, "tier": eff_tier}
+
+    summary = res.get("summary", "") or ""
+    report_path = res.get("report_path", "")
+    in_scope = res.get("in_scope", scope.get("in_scope", True))
+
+    # AI interpretation of the findings (best-effort).
+    interpreted = summary
+    if _kali_ai is not None:
+        try:
+            raw = summary
+            if report_path and Path(report_path).exists():
+                try:
+                    raw = Path(report_path).read_text(errors="replace")[:8000]
+                except Exception:
+                    raw = summary
+            interpreted = _kali_ai.interpret(tool, raw, target) or summary
+        except Exception as e:
+            _audit(f"KALI interpret error {tool}: {e}")
+            interpreted = summary
+
+    out = interpreted
+    if not in_scope:
+        out = f"⚠️ OUT OF SCOPE target: {target}\n\n{out}"
+    if report_path:
+        out = f"{out}\n\n📄 {report_path}"
+
+    return {
+        "success": bool(res.get("success", False)),
+        "output": out,
+        "action": action_name,
+        "tier": res.get("tier", eff_tier),
+        "in_scope": in_scope,
+        "report_path": report_path,
+        "tool": tool,
+        "target": target,
+    }
 
 
 def _audit(msg: str):

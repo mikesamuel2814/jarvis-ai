@@ -40,8 +40,44 @@ def log(msg: str) -> None:
         pass
 
 INTERACTIONS_LOG = JARVIS_HOME / "data" / "interactions.jsonl"
+GOLDEN_LOG       = JARVIS_HOME / "data" / "golden_examples.jsonl"
+CORRECTIONS_LOG  = JARVIS_HOME / "data" / "corrections.jsonl"
+LESSONS_LOG      = JARVIS_HOME / "data" / "lessons.jsonl"
 DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
 TRAINING_LOG     = TRAINING_LOG_FOR_LOG
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    """Read a jsonl file, tolerating missing files / bad lines."""
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def _entry_dt(entry: dict) -> datetime:
+    """Best-effort timestamp from an interaction record (ISO or epoch)."""
+    ts = entry.get("timestamp")
+    if ts:
+        try:
+            return datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            pass
+    epoch = entry.get("ts")
+    if isinstance(epoch, (int, float)):
+        try:
+            return datetime.fromtimestamp(epoch)
+        except (ValueError, OSError):
+            pass
+    return datetime(2000, 1, 1)
 
 _STRIP_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -51,21 +87,11 @@ def _strip(text: str) -> str:
 
 
 def load_interactions(days: int = 30) -> list[dict]:
-    if not INTERACTIONS_LOG.exists():
-        return []
     cutoff = datetime.now() - timedelta(days=days)
     results = []
-    for line in INTERACTIONS_LOG.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            ts = datetime.fromisoformat(entry.get("timestamp", "2000-01-01"))
-            if ts >= cutoff:
-                results.append(entry)
-        except Exception:
-            continue
+    for entry in _read_jsonl(INTERACTIONS_LOG):
+        if _entry_dt(entry) >= cutoff:
+            results.append(entry)
     return results
 
 
@@ -231,11 +257,15 @@ def check_memory_quality(collection) -> dict:
 
 
 def print_stats():
-    """Print interaction statistics for --stats flag."""
+    """Print interaction statistics for --stats flag. Lazy / no chromadb."""
     all_interactions = load_interactions(days=365)
     good  = sum(1 for i in all_interactions if i.get("rating") == "good")
     bad   = sum(1 for i in all_interactions if i.get("rating") == "bad")
     unrated = sum(1 for i in all_interactions if not i.get("rating"))
+
+    golden = len(_read_jsonl(GOLDEN_LOG))
+    corrections = len(_read_jsonl(CORRECTIONS_LOG))
+    lessons = len(_read_jsonl(LESSONS_LOG))
 
     last_training = "never"
     last_training_file = JARVIS_HOME / "data" / "last_training.txt"
@@ -249,6 +279,9 @@ def print_stats():
     print(f"  Good:    {good}")
     print(f"  Bad:     {bad}")
     print(f"  Unrated: {unrated}")
+    print(f"  Golden examples:    {golden}")
+    print(f"  Corrections:        {corrections}")
+    print(f"  Lesson candidates:  {lessons}")
     print(f"  Last training: {last_training}")
     print("=" * 42)
 
@@ -260,37 +293,77 @@ def run_learning():
     os.chdir(str(Path(__file__).parent))
 
     config = load_config()
-    embed_model = config["memory"].get("embedding_model", "nomic-embed-text")
-    client = chromadb.PersistentClient(path=config["memory"]["path"])
+    mem_cfg = config.get("memory", {}) if isinstance(config, dict) else {}
+    embed_model = mem_cfg.get("embedding_model", "mxbai-embed-large")
+    mem_path = mem_cfg.get("path", str(JARVIS_HOME / "memory"))
+    client = chromadb.PersistentClient(path=mem_path)
     collection = client.get_or_create_collection(
         name="jarvis_memory",
         metadata={"hnsw:space": "cosine"},
     )
 
     interactions = load_interactions(days=30)
-    if not interactions:
+
+    # Pull rated/corrected signals from BOTH the interactions log (updated in
+    # place by rapid_learner) and the dedicated artifact files (golden /
+    # corrections / lesson candidates) that rapid_learner appends to.
+    rated_good = [i for i in interactions if i.get("rating") == "good"]
+    rated_bad  = [i for i in interactions if i.get("rating") == "bad"]
+
+    golden_entries = _read_jsonl(GOLDEN_LOG)
+    correction_entries = _read_jsonl(CORRECTIONS_LOG)
+    lesson_candidates = _read_jsonl(LESSONS_LOG)
+
+    # Dedupe golden by interaction id, merging interactions.jsonl good + golden file
+    good_by_id: dict[str, dict] = {}
+    for e in rated_good + golden_entries:
+        good_by_id[e.get("id") or _chunk_id("g", json.dumps(e, sort_keys=True))] = e
+    good_all = list(good_by_id.values())
+
+    if not (interactions or golden_entries or correction_entries or lesson_candidates):
         log("Learner: no interactions to learn from yet.")
         return
 
-    rated_good = [i for i in interactions if i.get("rating") == "good"]
-    rated_bad  = [i for i in interactions if i.get("rating") == "bad"]
-    corrected  = [i for i in interactions if i.get("correction")]
-
-    log(f"Learner: {len(interactions)} interactions — {len(rated_good)} good, {len(rated_bad)} bad, {len(corrected)} corrections")
+    log(
+        f"Learner: {len(interactions)} interactions — {len(rated_good)} good, "
+        f"{len(rated_bad)} bad | files: {len(golden_entries)} golden, "
+        f"{len(correction_entries)} corrections, {len(lesson_candidates)} lesson candidates"
+    )
 
     lessons_added = 0
     golden_added = 0
 
-    # Corrections → highest priority lessons
+    # Pre-extracted lesson candidates (from rapid_learner corrections/queue) →
+    # upsert directly. These already carry a 'principle' string.
+    for cand in lesson_candidates:
+        text = cand.get("principle") or cand.get("text") or ""
+        if not text:
+            continue
+        ltype = cand.get("category", "learned")
+        ts = cand.get("timestamp") or str(cand.get("ts", ""))
+        upsert_lesson(collection, embed_model, text, ltype, ts)
+        log(f"  [lesson] {text[:90]}")
+        lessons_added += 1
+
+    # Explicit corrections (correction file + any inline-corrected interactions)
+    corrected = correction_entries + [i for i in interactions if i.get("correction")]
+    seen_corr: set[str] = set()
     for entry in corrected:
-        corr = entry["correction"]
+        corr = entry.get("correction")
+        if not corr:
+            continue
         query = entry.get("query", "")
+        key = _chunk_id("c", f"{query}|{corr}")
+        if key in seen_corr:
+            continue
+        seen_corr.add(key)
         lesson_text = f"CORRECTION: When asked '{query[:120]}', the correct answer is: {corr}"
-        upsert_lesson(collection, embed_model, lesson_text, "correction", entry.get("timestamp", ""))
+        upsert_lesson(collection, embed_model, lesson_text, "correction",
+                      entry.get("timestamp", "") or str(entry.get("ts", "")))
         log(f"  [lesson] {lesson_text[:90]}")
         lessons_added += 1
 
-    # Bad interactions → extract lessons via LLM
+    # Bad interactions (no correction) → extract lessons via LLM
     for entry in rated_bad:
         if entry.get("correction"):
             continue  # already handled as correction
@@ -300,16 +373,18 @@ def run_learning():
             None,
         )
         if lesson:
-            upsert_lesson(collection, embed_model, lesson, "learned", entry.get("timestamp", ""))
+            upsert_lesson(collection, embed_model, lesson, "learned",
+                          entry.get("timestamp", "") or str(entry.get("ts", "")))
             log(f"  [lesson] {lesson[:90]}")
             lessons_added += 1
 
-    # Good interactions → golden examples
-    for entry in rated_good:
+    # Good interactions / golden examples → golden RAG entries
+    for entry in good_all:
         q = entry.get("query", "")
         r = entry.get("response", "")
         if q and r and len(r) > 8:
-            upsert_golden(collection, embed_model, q, r, entry.get("timestamp", ""))
+            upsert_golden(collection, embed_model, q, r,
+                          entry.get("timestamp", "") or str(entry.get("ts", "")))
             log(f"  [golden] {q[:60]}")
             golden_added += 1
 

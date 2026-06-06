@@ -19,6 +19,24 @@ JARVIS_HOME = Path.home() / ".jarvis"
 DECISION_LOG   = JARVIS_HOME / "data" / "decisions.jsonl"
 DECISION_STATE = JARVIS_HOME / "data" / "decision_state.json"
 
+
+def _api_key() -> str:
+    """Read JARVIS_API_KEY from env or secrets.env file."""
+    key = os.environ.get("JARVIS_API_KEY", "")
+    if not key:
+        try:
+            for line in (JARVIS_HOME / "config" / "secrets.env").read_text().splitlines():
+                if line.startswith("JARVIS_API_KEY="):
+                    key = line.split("=", 1)[1].strip()
+                    break
+        except Exception:
+            pass
+    return key
+
+
+def _api_headers() -> dict:
+    return {"X-API-Key": _api_key()} if _api_key() else {}
+
 VPS_HOST = "38.47.35.16"
 VPS_USER = "admin93"
 
@@ -364,6 +382,7 @@ def check_services_smart(state: dict):
                 resp = requests.post(
                     f"http://localhost:{api_port}/action",
                     json={"action": f"restart_{svc.replace('-','_').replace('jarvis_telegram','telegram')}", "arg": ""},
+                    headers=_api_headers(),
                     timeout=10,
                 )
                 d = resp.json()
