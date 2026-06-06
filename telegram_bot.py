@@ -2014,11 +2014,13 @@ def main():
 
         # Check if this message is a ForceReply response to a pending action
         if uid in _pending_action and update.message.reply_to_message:
+            from executor import ACTIONS
             action = _pending_action.pop(uid)
             arg = text.strip()
             await update.message.chat.send_action("typing")
             result = run_action_via_api(action, arg=arg)
-            await _send_action_result(update, result)
+            desc = ACTIONS.get(action, {}).get("desc", action)
+            await _send_action_result(update, result, desc=desc, arg=arg)
             return
 
         # Intercept kali tool names typed as plain text → redirect to /kali usage hint.
