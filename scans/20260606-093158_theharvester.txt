@@ -1,0 +1,9 @@
+Read proxies.yaml from /etc/theHarvester/proxies.yaml
+Fatal Python error: _PyEval_EvalFrameDefault: Executing a cache.
+Python runtime state: initialized
+
+Current thread 0x00007fba4e48f200 (most recent call first):
+  <invalid frame>
+
+Extension modules: ujson, multidict._multidict, yarl._quoting_c, propcache._helpers_c, _brotli, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, _cffi_backend, frozenlist._frozenlist, yaml._yaml, simplejson._speedups, charset_normalizer.md, charset_normalizer.cd (total: 15)
+Aborted

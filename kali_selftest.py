@@ -48,10 +48,17 @@ except Exception as e:  # pragma: no cover
     sys.exit(2)
 
 
-def _authorized(target: str) -> bool:
+# Offline/local tools whose "target" is a search term or local file, not a
+# network host — these never touch a remote host, so the allow-list doesn't apply.
+_OFFLINE_TOOLS = {"searchsploit", "john", "hashcat"}
+
+
+def _authorized(target: str, tool: str = "") -> bool:
     """Belt-and-braces: must be in our local allow-list AND in kali_tools scope."""
     if not target:
         return True  # local-only tools (no remote target)
+    if tool in _OFFLINE_TOOLS:
+        return True  # offline search / local file — no remote host involved
     host = target.replace("http://", "").replace("https://", "").split("/")[0].split(":")[0]
     if host not in AUTHORIZED:
         return False
@@ -106,7 +113,7 @@ def run_selftest() -> int:
 
         if tool in live_map:
             _, target, opts = live_map[tool]
-            if not _authorized(target):
+            if not _authorized(target, tool):
                 note = f"SKIP target {target} not authorized"
             elif not bin_ok:
                 note = f"binary '{base}' missing — skipped run"
@@ -144,7 +151,7 @@ def run_selftest() -> int:
             note = "catalogue-only (binary check)"
 
         # Determine PASS/FAIL for this row.
-        if tool in live_map and _authorized(live_map[tool][1]) and bin_ok:
+        if tool in live_map and _authorized(live_map[tool][1], tool) and bin_ok:
             passed = bool(report_ok) and bool(interp_ok)
         else:
             passed = bin_ok  # for non-run tools, presence of binary is the bar

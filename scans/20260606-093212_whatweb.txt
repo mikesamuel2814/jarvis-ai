@@ -1,0 +1,6 @@
+/usr/lib/ruby/vendor_ruby/plugins.rb:31: [BUG] Segmentation fault at 0xffffffffffffffe8
+ruby 3.3.8 (2025-04-09 revision b200bad6cd) [x86_64-linux-gnu]
+
+-- Control frame information -----------------------------------------------
+c:0012 p:0001 s:0067 e:000066 BLOCK  /usr/lib/ruby/vendor_ruby/plugins.rb:31
+Segmentation fault
