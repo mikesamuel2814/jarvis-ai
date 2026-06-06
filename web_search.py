@@ -47,7 +47,7 @@ def search(query: str, num: int = 5) -> list[dict]:
     Falls back to [] on any error.
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=num))
         return [
