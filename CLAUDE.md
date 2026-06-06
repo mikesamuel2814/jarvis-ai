@@ -37,6 +37,26 @@ Jarvis follows these standing rules at runtime (injected via `brain_injector.py`
 2. **Autonomy**: Pre-approved actions (disk, memory, gpu, nginx_status, pm2_status, restart_gateway, restart_starline) execute automatically without asking. `reboot`, `update_system`, `deploy_vps` ALWAYS require explicit approval.
 3. **Learning**: Every correction (/correct) immediately extracts a rule and injects it into the next prompt. Skill gaps identified during training are enriched via web search.
 4. **Privacy**: Never send Payment-Gateway, AsthaCash, Starline, SSH keys, or credentials to external services.
+5. **Thinking Engine**: Every query gets intent-classified and thinking context injected (goals + session state + directive). Complex queries (CLOUD/HYBRID tier) get full multi-step reasoning context.
+6. **Response quality**: Every response scored 0-10. Score <4 triggers web search. Missing "Sir," is flagged. Nightly reflection auto-adds improvement rules.
+7. **Proactive decisions**: Jarvis surfaces system alerts and goal reminders every 5min via decision_engine.py — never silent about critical issues.
+
+---
+
+## Core Module Map
+
+| File | Purpose |
+|---|---|
+| `thinking_engine.py` | Core intelligence: reasoning, goals, scoring, briefings, self-reflection |
+| `skillset.py` | Rules + autonomy map + skill gaps |
+| `brain_injector.py` | Prompt injection (5s cache) |
+| `autonomy.py` | Auto-execution decisions |
+| `web_search_trainer.py` | Silent web search when uncertain |
+| `brain.py` | 4-tier query router (EDGE/CURSOR/HYBRID/CLOUD) |
+| `api.py` | FastAPI server — all endpoints |
+| `decision_engine.py` | Proactive 5-min checks + alerts |
+| `learner.py` | 6h training cycle + self-reflection |
+| `telegram_bot.py` | All Telegram commands |
 
 ---
 

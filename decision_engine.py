@@ -656,6 +656,29 @@ def check_high_resource(state: dict):
         _log(f"resource check error: {e}")
 
 
+def check_proactive_intelligence(state: dict):
+    """Run thinking engine proactive advisor every 5 min and surface high-priority insights."""
+    cooldown_key = "proactive_intel"
+    if not _cooldown_ok(state, cooldown_key):
+        return
+    try:
+        from thinking_engine import get_proactive_decisions
+        decisions = get_proactive_decisions()
+        for d in decisions:
+            if d.get("priority", 0) >= 8:  # Only surface urgent/important ones
+                dk = d.get("cooldown_key", "proactive_generic")
+                if _cooldown_ok(state, dk):
+                    msg = d["message"]
+                    if d.get("action"):
+                        msg += f"\n`/exec {d['action']}`"
+                    _notify(msg)
+                    _log_decision("proactive_intel", d["message"][:80], False)
+                    _cooldown_set(state, dk)
+    except Exception as e:
+        _log(f"proactive intelligence failed: {e}")
+    _cooldown_set(state, cooldown_key)
+
+
 def run_decision_engine() -> int:
     state = load_state()
     errors = 0
@@ -667,6 +690,7 @@ def run_decision_engine() -> int:
         check_vps_processes,
         check_vps_deploy_health,
         check_git_uncommitted,
+        check_proactive_intelligence,
     ]
     for check in checks:
         try:

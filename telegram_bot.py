@@ -1977,6 +1977,56 @@ def main():
                 lines.append(f"<b>🤖 {esc(model)}</b> — ❌ {esc(str(e))}\n")
         await send(update, "\n".join(lines), already_html=True)
 
+    async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate Sir's daily intelligence briefing."""
+        uid = update.effective_user.id
+        _cache_chat_id(uid)
+        if not _is_authorized(uid):
+            return
+        thinking_msg = await update.message.reply_text("📋 Generating briefing…")
+        try:
+            from thinking_engine import generate_briefing
+            briefing = generate_briefing(include_web=False)
+            await thinking_msg.delete()
+            await send(update, briefing)
+        except Exception as e:
+            await thinking_msg.edit_text(f"❌ Briefing failed: {e}")
+
+    async def think_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Deep multi-step reasoning on a question. /think <question>"""
+        uid = update.effective_user.id
+        _cache_chat_id(uid)
+        if not _is_authorized(uid):
+            return
+        query = " ".join(context.args).strip() if context.args else ""
+        if not query:
+            await send(update, "Sir, provide a question: `/think <your question>`")
+            return
+        thinking_msg = await update.message.reply_text("🧠 Thinking deeply…")
+        try:
+            from thinking_engine import think_before_answer, get_proactive_decisions, score_response
+            # Get thinking context
+            thinking_ctx = think_before_answer(query)
+            # Run via cloud tier for deep reasoning
+            import requests as req_lib
+            key = _ah()
+            r = req_lib.post(
+                f"{API_BASE}/query",
+                json={"query": f"[DEEP THINK] {query}", "context_results": 8},
+                headers=key,
+                timeout=120,
+            )
+            if r.ok:
+                resp = r.json().get("response", "")
+                score = score_response(query, resp)
+                score_badge = "🟢" if score["total"] >= 7 else ("🟡" if score["total"] >= 5 else "🔴")
+                await thinking_msg.delete()
+                await send(update, f"{resp}\n\n_{score_badge} Confidence: {score['total']}/10_")
+            else:
+                await thinking_msg.edit_text(f"❌ Think failed: {r.status_code}")
+        except Exception as e:
+            await thinking_msg.edit_text(f"❌ Error: {e}")
+
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
         _cache_chat_id(uid)
@@ -2222,6 +2272,8 @@ def main():
     app_bot.add_handler(CommandHandler("skills",     skills_cmd))
     app_bot.add_handler(CommandHandler("recall",     recall_cmd))
     app_bot.add_handler(CommandHandler("objectives", objectives_cmd))
+    app_bot.add_handler(CommandHandler("briefing",   briefing_cmd))
+    app_bot.add_handler(CommandHandler("think",      think_cmd))
     app_bot.add_handler(CommandHandler("benchmark",  benchmark_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))

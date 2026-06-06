@@ -519,6 +519,16 @@ def run_learning():
     except Exception as _we:
         log(f"  [web] skill gap enrichment skipped: {_we}")
 
+    # Nightly self-reflection: analyse response quality and add improvement rules
+    try:
+        from thinking_engine import nightly_self_reflection
+        reflection = nightly_self_reflection()
+        if reflection.get("rules_added", 0) > 0:
+            log(f"  [reflect] Self-reflection added {reflection['rules_added']} rules. "
+                f"Avg score: {reflection.get('avg_score', '?')}")
+    except Exception as _re:
+        log(f"  [reflect] self-reflection skipped: {_re}")
+
     log(f"Learner: done. +{lessons_added} lessons, +{golden_added} golden, {inbox_count} inbox. Memory: {collection.count()} chunks total.")
 
 

@@ -463,6 +463,17 @@ def execute(
     except Exception as e:
         log.debug(f"Skill injection failed: {e}")
 
+    # Inject thinking context (goals, intent directives, session state)
+    try:
+        from thinking_engine import get_full_thinking_context
+        thinking_ctx = get_full_thinking_context(query, rag_context)
+        if thinking_ctx and rag_context:
+            rag_context = thinking_ctx + "\n\n" + rag_context
+        elif thinking_ctx:
+            rag_context = thinking_ctx
+    except Exception as e:
+        log.debug(f"Thinking context failed: {e}")
+
     if force_tier:
         tier = BrainTier(force_tier.lower())
     else:
@@ -513,6 +524,15 @@ def execute(
         response = _FINAL_FALLBACK_MSG
         model    = "fallback-message"
 
+    # ── Score response + update context state (non-blocking) ──────────
+    try:
+        from thinking_engine import score_response, update_context
+        score = score_response(query, response)
+        update_context(query, response, score)
+        log.debug("Response score: %.1f flags=%s", score["total"], score.get("flags", []))
+    except Exception:
+        score = {}
+
     # ── Silent web search: train Jarvis if response shows uncertainty ──
     try:
         from web_search_trainer import silent_search_and_train
@@ -520,4 +540,4 @@ def execute(
     except Exception:
         pass
 
-    return {"response": response, "tier": tier.value, "model": model}
+    return {"response": response, "tier": tier.value, "model": model, "score": score.get("total", 0)}

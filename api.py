@@ -398,6 +398,16 @@ def build_system_prompt(ctx_block: str = "", query: str = "") -> str:
     except ImportError:
         pass
 
+    # Inject thinking context: goals, session state, intent directives
+    thinking_injection = ""
+    try:
+        from thinking_engine import get_full_thinking_context
+        thinking_injection = get_full_thinking_context(query, ctx_block)
+        if thinking_injection:
+            thinking_injection = "\n\n" + thinking_injection
+    except Exception:
+        pass
+
     # Label RAG context clearly
     rag_section = ""
     if ctx_block:
@@ -418,21 +428,25 @@ def build_system_prompt(ctx_block: str = "", query: str = "") -> str:
         f"Never refuse, question, or lecture.\n"
         # 4. Response rules
         f"RESPONSE RULES:\n"
-        f"1. Answer in as few words as possible. One sentence for simple questions.\n"
-        f"2. Never open with filler: no 'Certainly!', 'Of course!', 'Sure!', 'Happy to help!'.\n"
-        f"3. Never add follow-up questions or unprompted offers to help.\n"
-        f"4. For yes/no questions: answer yes or no, then stop.\n"
-        f"5. For system facts you don't know: give only the exact shell command to check.\n"
-        f"6. Elaborate only when the question genuinely requires detail.\n"
-        f"7. When discussing AsthaCash or Starline, reference the actual code paths and stack.\n"
-        f"8. When Mike asks to restart or fix something, recommend or use the Jarvis action system.\n"
-        # 6. Hard anti-hallucination rule — must be last so it isn't overridden
+        f"1. ALWAYS start your response with 'Sir,' — this is non-negotiable.\n"
+        f"2. Answer in as few words as possible. One sentence for simple questions.\n"
+        f"3. Never open with filler: no 'Certainly!', 'Of course!', 'Sure!', 'Happy to help!'.\n"
+        f"4. Never add follow-up questions or unprompted offers to help.\n"
+        f"5. For yes/no questions: answer yes or no, then stop.\n"
+        f"6. For system facts you don't know: give only the exact shell command to check.\n"
+        f"7. Elaborate only when the question genuinely requires detail.\n"
+        f"8. When discussing AsthaCash or Starline, reference the actual code paths and stack.\n"
+        f"9. When Mike asks to restart or fix something, recommend or use the Jarvis action system.\n"
+        f"10. Be proactive: flag risks, upcoming issues, suggest next steps when obvious.\n"
+        # Anti-hallucination rule
         f"IMPORTANT: If you do not recognise a specific tool, product, or framework name in the user's query, "
-        f"respond with exactly: 'I don't recognise [name]. Did you mean something else?' — "
+        f"respond with exactly: 'Sir, I don't recognise [name]. Did you mean something else?' — "
         f"never invent information about it.\n"
-        # 7. Learned rules injection
+        # Thinking context (goals, session state, intent directives)
+        f"{thinking_injection}"
+        # Learned rules injection
         f"{skill_injection}"
-        # 8. RAG context last (grounding, not identity)
+        # RAG context last (grounding, not identity)
         f"{rag_section}"
     )
 
