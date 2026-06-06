@@ -1604,6 +1604,37 @@ def main():
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app_bot.add_error_handler(error_handler)
 
+    # Register command menu with Telegram (shows in the / menu)
+    from telegram import BotCommand
+    _BOT_COMMANDS = [
+        BotCommand("help",      "Show all commands"),
+        BotCommand("sysinfo",   "Live CPU / RAM / GPU / Disk"),
+        BotCommand("health",    "Service health check"),
+        BotCommand("selfcheck", "Full system self-check"),
+        BotCommand("stats",     "Brain & memory stats"),
+        BotCommand("web",       "Real-time web search + AI answer"),
+        BotCommand("weather",   "Current weather"),
+        BotCommand("browse",    "Open a URL in headless browser"),
+        BotCommand("exec",      "Smart action dispatch"),
+        BotCommand("task",      "Delegate task to Claude Code"),
+        BotCommand("actions",   "List available actions"),
+        BotCommand("pending",   "Show pending approvals"),
+        BotCommand("kali",      "Run a Kali pentest tool"),
+        BotCommand("scans",     "List recent scan reports"),
+        BotCommand("correct",   "Correct last answer (trains brain)"),
+        BotCommand("learn",     "Run brain training now"),
+        BotCommand("index",     "Re-index your work"),
+        BotCommand("remember",  "Save a personal fact"),
+        BotCommand("voice",     "Toggle voice audio responses"),
+        BotCommand("clear",     "Clear chat history"),
+    ]
+
+    async def _post_init(application):
+        await application.bot.set_my_commands(_BOT_COMMANDS)
+        log.info("Bot command menu registered (%d commands)", len(_BOT_COMMANDS))
+
+    app_bot.post_init = _post_init
+
     log.info(f"Jarvis Telegram bot starting (API: {API_BASE})")
     app_bot.run_polling(
         allowed_updates=["message", "callback_query"],
