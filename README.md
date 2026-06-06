@@ -1,246 +1,204 @@
-# Jarvis — Personal AI Brain
+# Jarvis — Autonomous Personal AI Brain
 
 > **"Jarvis is the brain. Claude is every neuron."**
 
-Jarvis is a fully autonomous personal AI assistant running locally on a Kali Linux workstation. It combines a local LLM brain, semantic memory, Telegram interface, voice responses, proactive decision-making, and self-healing — all running on consumer hardware.
+Jarvis is a fully autonomous personal AI assistant running locally on a Kali Linux
+workstation. You give it a task in plain English — it **plans, decides, runs the
+safe actions itself, chains the next step, and reports back** — all on consumer
+hardware, with a local LLM brain, semantic memory, continuous self-learning, and
+human-approval gates on anything destructive.
 
-**Telegram:** [@MikePiJarvisBot](https://t.me/MikePiJarvisBot) · **API:** `http://localhost:8181` · **Repos:** [GitHub](https://github.com/mikesamuel2814/jarvis-ai) · [GitLab](https://gitlab.com/programmerhimel/jarvis)
+**Telegram:** [@MikePiJarvisBot](https://t.me/MikePiJarvisBot) · **API:** `http://127.0.0.1:8181` · **Repos:** [GitHub](https://github.com/mikesamuel2814/jarvis-ai) · [GitLab](https://gitlab.com/programmerhimel/jarvis)
 
 ---
 
 ## Owner
 
-**Mike Samuel** — Full-Stack Developer  
-Machine: Kali Linux · i9-14900KF · 64GB RAM · RTX 3050 6GB VRAM  
+**Mike Samuel** — Full-Stack Developer & Entrepreneur
+Machine: Kali Linux · i9-14900KF (24 cores) · 64GB RAM · RTX 3050 6GB VRAM
 Telegram Bot: [@MikePiJarvisBot](https://t.me/MikePiJarvisBot)
+
+---
+
+## What's New (June 2026) — The Autonomous Brain
+
+Jarvis evolved from a chat-and-actions assistant into a genuine autonomous agent.
+Five new intelligence layers now sit on top of the raw model calls:
+
+| Layer | Module | What it does |
+|-------|--------|--------------|
+| 🤖 **Agent Loop** | `jarvis_agent.py` | Plain-English task → plan → act → observe → answer (ReAct, structured outputs) |
+| 🧠 **Thinking Engine** | `thinking_engine.py` | Intent classification, response scoring, goal tracking, proactive advisor, daily briefings, nightly self-reflection |
+| 📜 **Skillset Engine** | `skillset.py` | Learned rules, autonomy map, approval tracking, skill gaps |
+| 💉 **Brain Injector** | `brain_injector.py` | Injects learned rules into every prompt (5s cache, zero query overhead) |
+| 🔓 **Autonomy Engine** | `autonomy.py` | Decides what runs without asking; promotes actions to "learned-safe" after 3 approvals |
+| 🔍 **Web Search Trainer** | `web_search_trainer.py` | Silently searches the web when uncertain, extracts lessons, trains itself |
+
+---
+
+## The Agent Loop — How Jarvis Actually Does Tasks
+
+```
+You: "/do are both my projects healthy?"
+        │
+        ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │  jarvis_agent.run_agent()                                 │
+  │                                                          │
+  │   1. PLAN   qwen2.5-coder:7b  (structured JSON output)   │
+  │             picks next action from a relevance-filtered   │
+  │             catalog of your whitelisted actions           │
+  │                                                          │
+  │   2. ACT    autonomy gate decides:                       │
+  │               • read-only      → run now                 │
+  │               • pre-approved   → run now                 │
+  │               • destructive    → PAUSE, ask via Telegram │
+  │                                                          │
+  │   3. OBSERVE feed the action's output back into context  │
+  │                                                          │
+  │   4. LOOP   until done or max_steps (default 6)          │
+  │                                                          │
+  │   5. ANSWER synthesise a clean "Sir, …" reply           │
+  └──────────────────────────────────────────────────────────┘
+        │
+        ▼
+Jarvis: "Sir, ran vps_ps + vps_disk — both projects are healthy."
+```
+
+**Why structured outputs, not native function-calling?** Ollama's native `tools`
+API **segfaults llama-server on the RTX 3050**. The JSON-schema `format` path is
+rock-solid. The agent uses it exclusively.
+
+**Why a relevance-filtered catalog?** Listing all 69 actions in the prompt also
+crashes the 7B on 6GB VRAM. Jarvis ranks actions by verb-weighted keyword match
+to the task and shows only the top ~10 — which keeps the model **stable and more
+accurate** (fewer distractors). If the 7B ever crashes, it falls back to the 3B.
+
+**Entry points:** `POST /agent` · Telegram `/do <task>`
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     JARVIS BRAIN                        │
-│                                                         │
-│  Telegram Bot ──► API (FastAPI :8181) ──► Ollama LLMs  │
-│       │                  │                              │
-│       │              ChromaDB                          │
-│       │           Semantic Memory                      │
-│       │            (8,621+ chunks)                     │
-│       │                  │                             │
-│  Voice (TTS) ◄── Decision Engine ◄── Monitor (5min)    │
-│                                                         │
-│  Healer (10min) ────────────────► Self-Recovery        │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        JARVIS BRAIN                             │
+│                                                                │
+│  Telegram Bot ──┐                                              │
+│  CLI / API ─────┼──► FastAPI (api_v2.py :8181, X-API-Key)      │
+│                 │            │                                  │
+│                 │            ├──► Agent Loop (jarvis_agent.py)  │
+│                 │            ├──► Brain Router (brain.py)       │
+│                 │            │      EDGE / CURSOR / HYBRID/CLOUD│
+│                 │            │            │                     │
+│                 │       Thinking Engine   ├──► Ollama LLMs      │
+│                 │       + Skillset        ├──► Claude (cloud)   │
+│                 │       + Web Trainer     │                     │
+│                 │            │            ▼                     │
+│                 │       ChromaDB Semantic Memory (~10.7k chunks)│
+│                 │                                               │
+│  Voice (TTS) ◄── Decision Engine ◄── Monitor (every 5 min)     │
+│  Self-Healer (every 10 min) ──────► Self-Recovery              │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-| Component        | Detail                                         |
-|------------------|------------------------------------------------|
-| Brain            | DeepSeek-R1 7B via Ollama (GPU, port 11434)   |
-| Memory           | ChromaDB at `~/.jarvis/memory/` (8,621 chunks)|
-| API              | FastAPI at `http://localhost:8181`             |
-| Telegram         | @MikePiJarvisBot (python-telegram-bot)         |
-| Embed Model      | mxbai-embed-large                              |
-| Voice            | edge-tts (en-GB-RyanNeural) → MP3 via mpg123  |
-| Self-Healer      | healer.py — runs every 10 min via cron         |
+| Component        | Detail                                               |
+|------------------|------------------------------------------------------|
+| API server       | `api_v2.py` — FastAPI, binds `127.0.0.1:8181`, X-API-Key auth |
+| Brain router     | `brain.py` — 4-tier (Edge / Cursor / Hybrid / Cloud) |
+| Agent planner    | `qwen2.5-coder:7b` (→ 3b fallback) via structured outputs |
+| Reasoning brain  | DeepSeek-R1 7B via Ollama (GPU, port 11434)         |
+| Memory           | ChromaDB at `~/.jarvis/memory/` (~10,700 chunks)    |
+| Embeddings       | mxbai-embed-large (1024-dim)                         |
+| Telegram         | @MikePiJarvisBot (python-telegram-bot)              |
+| Voice            | edge-tts (en-GB-RyanNeural) → MP3 via mpg123        |
+| Self-Healer      | `healer.py` — every 10 min via cron                 |
 
 ---
 
-## Model Routing
+## Model Routing (brain.py — 4 Tiers)
 
-Jarvis automatically selects the best model for each query:
+Jarvis picks the cheapest capable tier for each query:
 
-| Trigger | Model | Purpose |
-|---------|-------|---------|
-| Short greetings, casual chat | `phi4-mini` | Fast, lightweight |
-| Code keywords (bug, function, class…) | `qwen2.5-coder:7b` | Code specialist |
-| Reasoning keywords (why, analyze, explain…) | `deepseek-r1:7b` | Deep reasoning |
-| Vision / image analysis | `llava:7b` | Multimodal |
-| Default / fallback | `deepseek-r1:7b` | Primary brain |
+| Tier | Model | When |
+|------|-------|------|
+| **EDGE** | `phi4-mini` / `qwen2.5-coder:7b` / `deepseek-r1:7b` | Casual chat, sysinfo, trivial code lookups — local, instant, free |
+| **CURSOR** | Cursor + Claude (falls back to Cloud) | Concrete code/ops on Mike's projects |
+| **HYBRID** | Local pre-analysis → Claude | Ambiguous prose needing reasoning |
+| **CLOUD** | Claude Sonnet 4.6 | Open-ended why/how/analyze/architecture |
 
----
-
-## Core Features
-
-### 1. Conversational AI (Telegram + CLI)
-
-- **Telegram Bot** — full chat interface with per-user conversation history (30 messages)
-- **CLI (`jarvis_cli.py`)** — interactive terminal REPL with streaming responses
-- **Context-aware** — every query is augmented with relevant memories from ChromaDB (RAG)
-- **Smart routing** — casual queries use fast model, complex ones use the brain model
-- **`!cmd`** prefix in CLI — run shell commands and inject output into context
-- **Image analysis** — send photos to Telegram bot for vision analysis (llava:7b)
-
-### 2. Semantic Memory (RAG)
-
-- **ChromaDB vector database** — 8,621+ embedded chunks across all knowledge sources
-- **Cosine distance retrieval** — finds most relevant context for every query
-- **Priority retrieval** — `lesson` and `golden` chunks surface first
-- **Distance threshold** — 0.55 filter removes low-relevance noise
-- **Knowledge sources indexed:**
-  - Claude Code session transcripts (`~/.jarvis/data/claude/`)
-  - Cursor IDE session logs (`~/.jarvis/data/cursor/`)
-  - All git repositories in `~/Projects/` (Python, JS, TS, Go, Rust, Bash, YAML, JSON)
-  - Shell history (`~/.zsh_history`)
-  - VPS deployment logs (`~/.jarvis/data/deployments/`)
-
-### 3. Continuous Brain Training (Learning Loop)
-
-Every interaction can make Jarvis smarter:
-
-- **👍 / 👎 buttons** on every Telegram response — rate quality instantly
-- **`/correct TEXT`** — correct a wrong answer; Jarvis extracts the lesson via LLM
-- **`/learn`** — manually trigger brain training run
-- **Automatic training every 6 hours** via cron (`train.sh`)
-- **learner.py processing:**
-  - 👍 rated → stored as `golden` examples (high priority in memory)
-  - 👎 rated → DeepSeek-R1 extracts rules → stored as `lesson` (high priority)
-  - Corrections → stored as `correction` (highest priority)
-- **Weekly full re-index** every Sunday 2am (`selftrain.py`)
-
-### 4. Action Execution (44 Whitelisted Actions)
-
-Jarvis understands natural language requests and executes actions with permission gates:
-
-**Permission Tiers:**
-
-| Tier | Confirmation Required | Examples |
-|------|-----------------------|---------|
-| `AUTO` | None — executes immediately | Show disk space, memory usage, logs |
-| `CONFIRM` | One-tap Telegram button | Restart Jarvis, restart Ollama, re-index |
-| `APPROVE` | Type "yes" confirmation | Deploy to VPS, SSH commands, shell, reboot |
-
-**⚡ AUTO (39 actions — instant, no approval):**
-`ps` · `disk` · `memory` · `uptime` · `gpu` · `ports` · `who` · `services` · `logs_jarvis` · `logs_telegram` · `logs_ollama` · `crontab` · `network` · `ollama_models` · `top5_cpu` · `top5_mem` · `tailscale` · `docker_ps` · `docker_stats` · `docker_logs_api` · `docker_logs_bot` · `pm2_status` · `pm2_logs_gateway` · `pm2_logs_starline` · `git_status_all` · `nginx_status` · `jarvis_logs_tail` · `file_read` · `file_list` · `project_status` · `vps_disk` · `vps_free` · `vps_ps` · `git_log_gw` · `git_log_sl` · `git_diff_gw` · `git_diff_sl` · `vps_nginx_logs` · `vps_services`
-
-**🔔 CONFIRM (23 actions — one-tap Telegram button):**
-`restart_jarvis` · `restart_telegram` · `restart_ollama` · `restart_monitor` · `restart_jarvis_sync` · `reindex` · `stop_jarvis` · `clear_history` · `docker_restart_api` · `docker_restart_bot` · `docker_up` · `docker_down` · `restart_gateway` · `restart_starline` · `git_pull_gw` · `git_pull_sl` · `npm_install_gw` · `pnpm_install_sl` · `npm_build_gw` · `pnpm_build_sl` · `vps_git_pull_gw` · `vps_git_pull_sl` · `vps_restart_nginx`
-
-**🔐 APPROVE (7 actions — high-risk, explicit confirmation):**
-`deploy_vps` · `ssh_cmd` · `shell` · `claude_task` · `file_write` · `reboot` · `update_system`
-
-### 5. Proactive Decision Engine
-
-Jarvis monitors systems every 5 minutes and acts autonomously on safe issues:
-
-- **Disk alert** — warns when disk >90%, critical at >92%
-- **RAM alert** — warns at >85%, critical at >90%
-- **CPU alert** — warns at sustained >88%
-- **GPU temperature** — alerts at >85°C (via nvidia-smi)
-- **Service monitoring** — detects downed services, sends approval request
-- **VPS PM2 monitoring** — auto-restarts crashed processes via SSH
-- **Git uncommitted check** — notifies if repos dirty >3 hours
-- **All decisions logged** to `~/.jarvis/data/decisions.jsonl`
-- **AI-driven** — uses DeepSeek-R1 to choose best action from options
-
-### 6. Voice System
-
-- **Text-to-speech** — edge-tts with British male voice (en-GB-RyanNeural)
-- **Local playback** — mpg123 plays audio locally on workstation
-- **Telegram audio** — sends MP3 voice messages inline in chat
-- **`/voice on|off`** — toggle per-user voice responses in Telegram
-- **API endpoints:**
-  - `POST /voice/speak` — speak text locally
-  - `POST /voice/audio` — return MP3 bytes
-  - `POST /voice/notify` — send TTS as Telegram audio message
-- **Auto-trimmed** — markdown stripped, max 500 chars for speech
-
-### 7. Self-Healing System
-
-Jarvis monitors and heals itself automatically:
-
-- **`healer.py`** runs every 10 minutes via cron, **independent of the Jarvis API**
-- **Service recovery** — detects downed services, attempts `systemctl start`, sends direct Telegram alert bypassing the bot
-- **Re-alert** — notifies every 30 min if a service stays down
-- **Log rotation** — rotates any log file exceeding 5MB (keeps last 2MB + 2 archives)
-- **Interactions archiving** — archives `interactions.jsonl` if it exceeds 50MB
-- **Disk space guard** — alerts at >92% disk usage
-- **Model integrity** — verifies required Ollama models are present
-- **Approval cleanup** — removes expired approval requests automatically
-- **`GET /selfcheck`** API endpoint — returns JSON health report
-- **`/selfcheck`** Telegram command — formatted health report on demand
-- **Heal history** logged to `~/.jarvis/data/heal_history.jsonl`
-
-### 8. Daily Briefings
-
-- **9am daily** — `analyze.py` generates a briefing:
-  - Git commits across all projects (last 24h)
-  - Shell command count
-  - Recent errors from all logs
-  - System snapshot (CPU, RAM, disk, uptime)
-  - Memory stats (ChromaDB chunk count)
-- **Sunday 9am** — weekly summary (last 7 days)
-- Sent via Telegram or printed to console
-
-### 9. Mike's Profile Always Loaded
-
-Every prompt includes Mike's full profile:
-
-- Identity, email, role, location
-- Full tech stack (Python, JS/TS, React, Node.js, FastAPI, PostgreSQL, MongoDB)
-- Hardware specs and VRAM constraints
-- Active projects (AsthaCash, Starline-Final-web)
-- Infrastructure (VPS IP, Tailscale, PM2)
-- Preferences (direct comms, high autonomy, approval gates)
-- Stored via `mike_profile.yaml` + `profile.py`
-
-### 10. VPS Integration (OpenClaw)
-
-- **VPS monitoring** — checks PM2 process health on `38.47.35.16` every 5 min
-- **Auto PM2 restart** — downed processes restarted automatically via SSH
-- **Deploy action** — `deploy_vps` triggers git pull + npm install + pm2 restart
-- **Arbitrary SSH** — `ssh_cmd` action (APPROVE tier)
-- **Webhook endpoint** — `POST /webhook` receives events from VPS → Jarvis
-- **Tailscale VPN** — secure internal network at `100.110.210.103`
-
-### 11. User Facts Memory
-
-- `/remember KEY VALUE` — save explicit facts about Mike
-- Auto-detects facts in chat ("my favourite X is Y", "I like X")
-- Facts injected into every prompt as context block
-- Stored in `user_facts.json` (flat key-value)
-
-### 12. Cursor IDE Tracking
-
-- `cursor_monitor.py` watches Cursor IDE session files for AI conversation data
-- Captures `.log`, `.json`, `.jsonl` files from Cursor's config directories
-- Converts to text, stores in `~/.jarvis/data/cursor/`
-- 5-second debounce per file to avoid flooding
-- Initial scan on startup + live watchdog
+Every tier gets **learned rules** (brain_injector) and **thinking context**
+(goals + session state + intent directive) injected automatically.
 
 ---
 
-## API Endpoints
+## Core Intelligence Features
 
-`FastAPI running at http://localhost:8181`
+### 🧠 Thinking Engine (`thinking_engine.py`)
+
+- **Intent classification** — decision / urgent_fix / project_question / planning → tailored directive injected into the prompt
+- **Response scoring (0–10)** — completeness, persona ("Sir,"), uncertainty, actionability, filler detection
+- **Goal tracking** — keeps Mike's active goals (AsthaCash stability, Starline delivery, Jarvis development, hardware upgrade) front-of-mind in every response
+- **Proactive advisor** — surfaces disk/RAM/VRAM pressure and goal reminders every 5 min; priority ≥8 alerts go straight to Telegram
+- **Daily briefing** — `/briefing`: system health + services + goals + 24h activity
+- **Nightly self-reflection** — scores the day's responses, auto-adds improvement rules when quality drops
+
+### 📜 Skillset + Autonomy (`skillset.py`, `autonomy.py`)
+
+- **Learned rules** injected into every prompt, ranked by relevance + priority + hit count
+- **Autonomy map:**
+  - `pre_approved` — auto-execute (disk, memory, gpu, pm2_status, nginx_status, restart_gateway, restart_starline)
+  - `always_ask` — NEVER auto-run (reboot, update_system, deploy_vps, shell, ssh_cmd)
+  - `learned_safe` — promoted automatically after 3 human approvals
+- **Privacy-absolute** — AsthaCash, Starline, SSH keys, credentials, VPS IPs never leave the machine
+
+### 🔍 Web Search Trainer (`web_search_trainer.py`)
+
+- Detects uncertainty in Jarvis's own answers ("I don't know", outdated, <80 chars)
+- Silently searches the web (DuckDuckGo, non-blocking daemon thread), extracts 1–3 lessons via DeepSeek
+- Stores lessons in ChromaDB + skillset → available on the **next** query
+- Rate-limited (3 searches / 10 min), privacy-guarded, enriches skill gaps during the 6h training cycle
+
+### 💬 Continuous Brain Training (Learning Loop)
+
+- **👍 / 👎** on every Telegram response — rate instantly
+- **`/correct TEXT`** — correction → DeepSeek extracts a rule → injected into the very next prompt (~100ms, no retrain wait)
+- **Automatic training every 6 hours** (`train.sh` → indexer + learner)
+- 👍 → `golden` examples · 👎 → `lesson` rules · corrections → highest priority
+- **Weekly full re-index** every Sunday 2am
+
+---
+
+## Action Execution (69 Whitelisted Actions, Tiered)
+
+| Tier | Confirmation | Examples |
+|------|--------------|---------|
+| `AUTO` (39) | None — instant | disk, memory, gpu, logs, pm2_status, nginx_status, git status |
+| `CONFIRM` (23) | One-tap Telegram button | restart_jarvis, restart_gateway, git_pull, npm/pnpm build |
+| `APPROVE` (7) | Explicit approval | deploy_vps, ssh_cmd, shell, file_write, reboot, update_system |
+
+The agent and the autonomy engine both respect these tiers — read-only runs free,
+pre-approved/learned-safe auto-runs, everything else pauses for a one-tap approval.
+
+---
+
+## API Endpoints (api_v2.py — `http://127.0.0.1:8181`, X-API-Key required)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Ollama + ChromaDB status + model info |
-| `GET` | `/selfcheck` | Full system health report (JSON) |
-| `GET` | `/sysinfo` | CPU, RAM, GPU, disk, network stats |
-| `GET` | `/stats` | Memory chunks + source type breakdown |
-| `GET` | `/models` | List available Ollama models |
-| `GET` | `/persona` | Current system prompt template |
-| `POST` | `/query` | Main query with RAG + smart model routing |
-| `POST` | `/claude-plan` | AI action planning via Ollama |
-| `POST` | `/claude-exec` | Fast-path action detection + LLM planning loop |
-| `POST` | `/index` | Trigger indexer.py re-index |
-| `POST` | `/feedback` | Rate an interaction good/bad |
-| `POST` | `/correct` | Submit a correction for training |
-| `POST` | `/learn` | Trigger learner.py brain training |
-| `GET` | `/learning-stats` | Rated/corrected interaction counts |
-| `POST` | `/action` | Execute whitelisted action (permission-gated) |
-| `POST` | `/approve/{req_id}` | Approve a pending action |
-| `POST` | `/deny/{req_id}` | Deny a pending action |
-| `GET` | `/cache-stats` | Response cache entries, hits, embed cache size |
-| `POST` | `/cache-clear` | Clear response cache |
-| `POST` | `/telegram/send` | Send Telegram message directly |
-| `POST` | `/telegram/alert` | Send alert with 🚨 prefix |
-| `POST` | `/webhook` | VPS → Jarvis event webhook |
-| `POST` | `/voice/speak` | Speak TTS locally via mpg123 |
-| `POST` | `/voice/audio` | Generate TTS → return MP3 bytes |
-| `POST` | `/voice/notify` | Send TTS as Telegram voice message |
+| `POST` | `/agent` | **Autonomous agent loop** — plain-English task → plan, act, answer |
+| `POST` | `/query` | Main query — 4-tier brain routing + RAG + thinking context |
+| `GET`  | `/health` | Ollama + ChromaDB status |
+| `GET`  | `/sysinfo` | CPU, RAM, GPU, disk, uptime |
+| `GET`  | `/metrics` | Full metrics dashboard |
+| `GET`  | `/learning-stats` | Learning queue / golden / lessons counts |
+| `POST` | `/action` | Execute whitelisted action (autonomy + permission gated) |
+| `POST` | `/feedback` | Rate an interaction 👍/👎 |
+| `POST` | `/correct` | Submit a correction (trains brain immediately) |
+| `POST` | `/memory/save` | Save a chunk directly to ChromaDB |
+| `POST` | `/memory/sync` | Bidirectional ChromaDB ↔ OpenClaw sync |
+| `POST` | `/voice/notify` | Send TTS as a Telegram voice message |
+| `POST` | `/webhook/openclaw` | VPS → Jarvis events (HMAC-signed) |
 
 ---
 
@@ -248,45 +206,33 @@ Every prompt includes Mike's full profile:
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome message, reset session |
-| `/help` | Full command list |
-| `/health` | Service health status |
-| `/stats` | Memory + model statistics |
-| `/sysinfo` | Live system card (CPU · RAM · Disk · GPU · Network) |
-| `/selfcheck` | Full system self-check report (services, models, crons) |
-| `/index` | Trigger memory re-indexing |
-| `/clear` | Clear conversation history |
-| `/remember KEY VALUE` | Save a personal fact (persists across sessions) |
-| `/voice on\|off` | Toggle voice audio responses |
-| `/correct TEXT` | Correct last response (trains brain) |
-| `/learn` | Run brain training now |
-| `/actions` | List all available actions by tier |
-| `/pending` | Show pending approval requests |
-| `/approve ID` | Approve a pending action |
-| `/deny ID` | Deny a pending action |
-| `/task DESC` | Delegate task to Claude Code (runs background, result here) |
-| `/exec CMD` | Smart dispatch: detect action or plan + execute via LLM |
+| `/do TASK` | 🤖 **Autonomous agent** — plans, runs safe actions, reports back |
+| `/think Q` | Deep multi-step reasoning + confidence score |
+| `/briefing` | Daily intelligence briefing (health + projects + goals + stats) |
+| `/objectives` | Owner profile, projects & Jarvis goals |
+| `/exec CMD` | Smart dispatch (detect action or plan + execute) |
+| `/task DESC` | Delegate to Claude Code (async, result returned here) |
+| `/web Q` `/search Q` | Real-time web search + AI answer |
+| `/weather [city]` | Current weather |
+| `/browse URL` | Open URL in headless browser |
+| `/kali [tool target]` | Pentest tools (L1–L4, scope-guarded) |
+| `/scans` | Recent scan reports |
+| `/oc [tool]` | OpenClaw gateway status / tool invocation |
+| `/actions` `/pending` `/approve ID` `/deny ID` | Action & approval management |
+| `/correct TEXT` `/learn` `/index` | Learning & memory |
+| `/recall [topic]` `/remember K V` | Memory recall / save a fact |
+| `/stats` `/sysinfo` `/health` `/selfcheck` `/probe` `/skills` | Status & diagnostics |
+| `/voice on\|off` | Toggle voice responses |
 
-**Inline:** After every response, tap 👍 or 👎 to train Jarvis.
+**Inline:** tap 👍 / 👎 after any response to train Jarvis.
 
-### Natural Language Fast-Path (instant, no LLM)
+---
 
-Typing any of these routes directly to the system — never the LLM:
+## Proactive & Self-Healing Systems
 
-`stats` · `openclaw stats` · `jarvis stats` · `system stats` · `sysinfo` · `system info` · `hardware info` · `full stats` · `give me stats` · any phrase ≤5 words containing "stat"
-
-### Quick Aliases (type without slash)
-
-| Alias | Action |
-|---|---|
-| `pm2` | pm2_status |
-| `nginx` | nginx_status |
-| `git st` | git_status_all |
-| `jlogs` | jarvis_logs_tail |
-| `gw logs` | pm2_logs_gateway |
-| `gw restart` | restart_gateway |
-| `sl logs` | pm2_logs_starline |
-| `sl restart` | restart_starline |
+- **Decision Engine** (every 5 min) — disk/RAM/CPU/GPU alerts, downed-service detection, VPS PM2 monitoring, git-uncommitted nudges, **autonomy-aware auto-restart** of pre-approved services, plus the Thinking Engine's proactive advisor
+- **Self-Healer** (`healer.py`, every 10 min, independent of the API) — service recovery, log rotation (>5MB), interactions archiving (>50MB), disk guard, model-integrity check, expired-approval cleanup
+- **Voice** — edge-tts British male; local mpg123 playback + Telegram audio
 
 ---
 
@@ -294,54 +240,41 @@ Typing any of these routes directly to the system — never the LLM:
 
 ```
 ~/.jarvis/
-├── api.py               # FastAPI REST server (44+ endpoints)
-├── telegram_bot.py      # Telegram bot interface
-├── jarvis_cli.py        # Interactive terminal REPL
-├── indexer.py           # RAG indexing (Claude, git, shell, VPS)
-├── learner.py           # Brain self-training from feedback
-├── monitor.py           # System health watchdog (every 5 min)
-├── decision_engine.py   # AI-powered proactive decisions
-├── healer.py            # Autonomous self-healing (every 10 min)
-├── executor.py          # Whitelisted action execution
-├── permissions.py       # Permission request / approval flow
-├── claude_planner.py    # LLM-based action planning
-├── profile.py           # Mike's profile → system prompt injection
-├── user_facts.py        # Persistent user fact storage
-├── voice.py             # TTS via edge-tts + mpg123
-├── cursor_monitor.py    # Cursor IDE session capture
-├── analyze.py           # Daily/weekly briefing generator
-├── selftrain.py         # Weekly full memory re-index
-├── train.sh             # 6-hour training cycle script
-├── verify.sh            # Full system check (23 items)
+├── api_v2.py            # FastAPI server (RUNNING — secure, X-API-Key)
+├── brain.py            # 4-tier brain router (Edge/Cursor/Hybrid/Cloud)
+├── jarvis_agent.py     # 🤖 Autonomous agent loop (ReAct, structured outputs)
+├── thinking_engine.py  # 🧠 Reasoning, scoring, goals, briefings, reflection
+├── skillset.py         # 📜 Rules + autonomy map + skill gaps
+├── brain_injector.py   # 💉 Live rule injection into prompts
+├── autonomy.py         # 🔓 Auto-execution decisions
+├── web_search_trainer.py # 🔍 Silent web search + self-training
+├── executor.py         # Whitelisted action execution (69 actions, tiered)
+├── telegram_bot.py     # Telegram interface (/do, /think, /briefing, …)
+├── decision_engine.py  # Proactive 5-min checks + alerts
+├── learner.py          # 6h training cycle + nightly reflection
+├── indexer.py          # RAG indexing (Claude, git, shell, VPS)
+├── healer.py           # Autonomous self-healing
+├── claude_client.py    # Cloud tier (Claude Sonnet)
+├── kali_tools.py       # Scoped pentest tooling
+├── voice.py            # TTS via edge-tts + mpg123
+├── profile.py / user_facts.py  # Owner profile + fact memory
 │
 ├── config/
-│   ├── jarvis.yaml      # Main configuration
-│   ├── mike_profile.yaml # Owner profile (always loaded)
-│   └── telegram.json    # Bot token
+│   ├── jarvis.yaml / jarvis_v2.yaml   # Configuration
+│   ├── mike_profile.yaml              # Owner profile (always loaded)
+│   └── secrets.env                    # API keys (gitignored)
 │
-├── memory/              # ChromaDB vector database (~85MB)
 ├── data/
-│   ├── interactions.jsonl   # All Q&A pairs (training data)
-│   ├── decisions.jsonl      # AI decision log
-│   ├── heal_history.jsonl   # Self-healer action log
-│   ├── telegram_history.json # Per-user conversation history
-│   ├── pending_approvals.json # Pending action requests
-│   └── user_facts.json      # Persisted user facts
+│   ├── skillset.json                  # Learned rules + autonomy map
+│   ├── thinking/goals.json            # Active goals
+│   ├── thinking/context_state.json    # Rolling session state
+│   ├── agent_runs.jsonl               # Agent task history
+│   ├── interactions.jsonl             # All Q&A (training data)
+│   └── …                              # (gitignored runtime data)
 │
-├── logs/
-│   ├── jarvis.log           # API server
-│   ├── telegram_bot.log     # Telegram bot
-│   ├── monitor.log          # Monitor + decision engine
-│   ├── healer.log           # Self-healer
-│   ├── indexer.log          # Indexing operations
-│   ├── executor.log         # Action execution audit
-│   ├── permissions.log      # Permission audit trail
-│   └── training.log         # Training / indexing
-│
-└── docker/
-    ├── docker-compose.yml   # API + bot + indexer containers
-    ├── Dockerfile
-    └── up.sh
+├── memory/             # ChromaDB vector DB (gitignored)
+├── logs/               # All logs (gitignored)
+└── docker/             # Container stack
 ```
 
 ---
@@ -349,51 +282,31 @@ Typing any of these routes directly to the system — never the LLM:
 ## Cron Schedule
 
 ```
-PYTHONUNBUFFERED=1
-
-*/5  * * * *   monitor.py          # Health checks + AI decisions + voice alerts
-*/10 * * * *   healer.py           # Self-healing + log rotation + service recovery
-0    9 * * *   analyze.py          # Daily briefing → Telegram
-0    9 * * 0   analyze.py --weekly # Weekly summary → Telegram
-0    2 * * 0   selftrain.py        # Full force re-index (Sunday 2am)
-0    */6 * * * train.sh            # Index new data + run learner.py
+*/5  * * * *   monitor.py + decision_engine.py   # Health + AI decisions + proactive advisor
+*/10 * * * *   healer.py                          # Self-healing + log rotation
+0    9 * * *   analyze.py                          # Daily briefing → Telegram
+0    9 * * 0   analyze.py --weekly                 # Weekly summary
+0    2 * * 0   selftrain.py                        # Full re-index (Sunday 2am)
+0  */6 * * *   train.sh                            # Index + learner + web enrichment + reflection
 ```
 
 ---
 
-## Systemd Services
+## Hardware & Optimizations
 
-```
-jarvis.service           → Jarvis API       (Restart=on-failure, RestartSec=5)
-jarvis-telegram.service  → Telegram Bot     (Restart=on-failure, RestartSec=10)
-ollama.service           → Ollama LLM       (GPU inference)
-```
+| Component | Mike's Setup |
+|-----------|--------------|
+| CPU | i9-14900KF (24 cores) |
+| RAM | 64GB DDR5 |
+| GPU | RTX 3050 6GB VRAM |
 
----
+**VRAM (6GB) constraints baked into the design:**
+- Models ≤ 7B, `num_ctx ≤ 2048`, one model loaded at a time
+- Agent planner prompt kept small (≤10 actions) — full catalog segfaults the 7B
+- Native Ollama `tools` API avoided — it crashes llama-server; structured outputs used instead
+- 3B fallback planner for guaranteed stability
 
-## Hardware Requirements
-
-| Component | Minimum | Mike's Setup |
-|-----------|---------|--------------|
-| CPU | Any modern multi-core | i9-14900KF (24 cores) |
-| RAM | 16GB | 64GB DDR5 |
-| GPU | NVIDIA (4GB+ VRAM) | RTX 3050 6GB |
-| Storage | 20GB free | SSD |
-
-**VRAM Optimizations (RTX 3050 6GB):**
-- `OLLAMA_FLASH_ATTENTION=1` — 40% KV cache reduction
-- `OLLAMA_MAX_LOADED_MODELS=1` — one model in VRAM at a time
-- `num_ctx=8192` — KV cache overflow to 64GB RAM
-- `num_keep=256` — system prompt always pinned in VRAM
-- Models ≤ 7B parameters
-
-**RAM Utilization (64GB):**
-- Response cache: 300 entries, 600s TTL — cached hits ~0.01s vs 30s cold
-- Embedding cache: 2000 entries — no re-embedding same text
-- ChromaDB pre-warm: full collection loaded into page cache at startup
-- `MALLOC_ARENA_MAX=4` — 4 allocator arenas across 32 threads
-
-**Planned upgrade:** NVIDIA Project DIGITS / RTX Spark (~128GB unified memory) for 70B+ models.
+**Planned upgrade:** NVIDIA Project DIGITS / RTX Spark (~128GB unified) for 70B+ models.
 
 ---
 
@@ -403,32 +316,27 @@ ollama.service           → Ollama LLM       (GPU inference)
 # Start services
 sudo systemctl start ollama jarvis jarvis-telegram
 
-# Chat via CLI
-jarvis
+# Health
+curl -s http://127.0.0.1:8181/health
 
-# Check health
-curl http://localhost:8181/health
-
-# Run full system check
-~/.jarvis/venv/bin/python3 ~/.jarvis/verify.sh
-
-# Trigger memory re-index
-curl -X POST http://localhost:8181/index
+# Autonomous task (via Telegram): /do give me a system health check
+# Or via API:
+curl -s -X POST http://127.0.0.1:8181/agent \
+  -H "X-API-Key: $JARVIS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"task":"are both my projects healthy?","max_steps":6}'
 ```
 
 ---
 
 ## Active Projects in Memory
 
-Jarvis has full semantic memory of these codebases:
-
-**AsthaCash** — Payment Gateway  
-`/home/kali/Projects/kalimike/Payment-Gateway/`  
+**AsthaCash** — Payment Gateway
+`/home/kali/Projects/kalimike/Payment-Gateway/`
 React admin dashboard + Node.js WebSocket backend · VPS via PM2
 
-**Starline-Final-web** — Real Estate Platform  
-`/home/kali/Projects/kalimike/Starline-Final-web/`  
-React (conztru) + Express API + PostgreSQL · pnpm monorepo · GitHub Actions CI/CD
+**Starline-Final-web** — Real Estate Platform (conztru)
+`/home/kali/Projects/kalimike/Starline-Final-web/`
+React + Express + PostgreSQL · pnpm monorepo · GitHub Actions CI/CD
 
 ---
 
@@ -436,13 +344,13 @@ React (conztru) + Express API + PostgreSQL · pnpm monorepo · GitHub Actions CI
 
 | Issue | Mitigation |
 |-------|------------|
-| `ollama run` CLI segfaults on RTX 3050 | Use REST API only |
-| Bun segfaults in Claude Code | `MALLOC_ARENA_MAX=2` in `~/.zshrc` |
-| ChromaDB import fails without env | `PYTHONUNBUFFERED=1` in all cron/service envs |
-| No ffmpeg binary | MP3 format throughout (no OGG conversion) |
-| 6GB VRAM limit | Max 7B models, one at a time |
+| Ollama native `tools` API segfaults RTX 3050 | Use structured outputs (`format` schema) only |
+| Full action catalog crashes 7B on 6GB VRAM | Relevance-filter to ≤10 actions per agent step |
+| `ollama run` CLI segfaults | Use REST API only |
+| ChromaDB import flaps | `PYTHONUNBUFFERED=1` + lazy imports in cron/service |
+| No ffmpeg binary | MP3 throughout (mpg123) |
 | sudo needs terminal | Service restarts via Telegram approval flow |
 
 ---
 
-*Built and maintained by Mike Samuel · Powered by DeepSeek-R1, ChromaDB, FastAPI, and Claude Code*
+*Built and maintained by Mike Samuel · Powered by Ollama (DeepSeek-R1, Qwen2.5-Coder), ChromaDB, FastAPI, and Claude · "Jarvis is the brain. Claude is every neuron."*
