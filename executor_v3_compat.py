@@ -25,19 +25,17 @@ import sys
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 sys.path.insert(0, str(JARVIS_HOME))
 
-from tools.core.system import *
-from tools.core.process import *
-from tools.core.file import *
-from tools.core.network import *
-from tools.core.security import *
-from tools.core.security_audit import *
-from tools.core.dev import *
-from tools.core.database import *
-from tools.core.docker import *
-from tools.core.web import *
-from tools.core.backup import *
-from tools.core.automation import *
-from tools.core.comms import *
+_TOOL_MODULES = [
+    "tools.core.system", "tools.core.process", "tools.core.file",
+    "tools.core.network", "tools.core.security", "tools.core.security_audit",
+    "tools.core.dev", "tools.core.database", "tools.core.docker",
+    "tools.core.web", "tools.core.backup", "tools.core.automation", "tools.core.comms",
+]
+for _mod in _TOOL_MODULES:
+    try:
+        __import__(_mod)
+    except Exception as _exc:
+        log.warning("Could not import %s: %s", _mod, _exc)
 
 from tools.decorator import get_tool_metadata, list_registered_tools
 from tools.registry import ToolRegistry
@@ -104,7 +102,7 @@ _NL_MAP: list[tuple[list[str], str]] = [
     (["running services", "list services", "show services"], "services"),
     (["network", "ip address", "interfaces", "show network"], "network"),
     (["models", "ai models", "ollama models"], "ollama_models"),
-    (["top cpu", "cpu usage", "check cpu"], "top5_cpu"),
+    (["top cpu", "cpu usage", "show cpu", "check cpu"], "top5_cpu"),
     (["top memory", "memory processes", "top ram"], "top5_mem"),
     (["tailscale", "vpn status"], "tailscale"),
     (["docker containers", "docker ps"], "docker_ps"),
