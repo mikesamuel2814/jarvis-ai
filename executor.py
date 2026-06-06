@@ -110,6 +110,34 @@ ACTIONS: dict[str, dict] = {
     "update_system":     {"desc": "Run apt update + upgrade",      "cmd": "sudo -n apt update && sudo -n apt upgrade -y",      "tier": APPROVE},
 }
 
+# ── Kali pentest tools (authorized security testing) ──────────────────────────
+# Merge KALI_TOOLS from kali_tools.py as `kali_<toolname>` actions. cmd=None
+# because execution goes through kali_tools.run_tool (scope-checked + sandboxed),
+# not the generic shell path. Lazy/guarded so executor still loads if the kali
+# modules are not ready yet (built in parallel by other agents).
+try:
+    import kali_tools as _kali_tools  # type: ignore
+    for _kt_name, _kt in _kali_tools.KALI_TOOLS.items():
+        ACTIONS[f"kali_{_kt_name}"] = {
+            "desc": _kt.get("desc", f"Kali tool {_kt_name}"),
+            "cmd": None,
+            "tier": _kt.get("tier", APPROVE),
+        }
+except Exception as _e:  # pragma: no cover - depends on parallel module
+    _kali_tools = None
+    try:
+        _audit_path = JARVIS_HOME / "logs" / "executor.log"
+        _audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_audit_path, "a") as _f:
+            _f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KALI_IMPORT skipped: {_e}\n")
+    except Exception:
+        pass
+
+try:
+    import kali_ai as _kali_ai  # type: ignore
+except Exception:
+    _kali_ai = None
+
 # ── Natural language → action name ────────────────────────────────────────────
 NL_MAP: list[tuple[list[str], str]] = [
     (["restart jarvis", "restart api", "restart the api"],                         "restart_jarvis"),
@@ -175,6 +203,16 @@ NL_MAP: list[tuple[list[str], str]] = [
     (["vps git pull starline", "deploy starline"],                                "vps_git_pull_sl"),
     (["restart nginx", "nginx restart"],                                          "vps_restart_nginx"),
     (["restart syncer", "restart jarvis-sync", "restart sync"],                  "restart_jarvis_sync"),
+
+    # ── Kali pentest (authorized security testing) ────────────────────────────
+    (["port scan", "scan ports", "scan for open ports", "quick scan", "nmap quick"], "kali_nmap_quick"),
+    (["service scan", "service version scan", "detect services", "nmap service", "enumerate services"], "kali_nmap_service"),
+    (["web scan", "scan website", "scan web server", "nikto scan"],               "kali_nikto"),
+    (["find subdomains", "subdomain enum", "harvest emails", "osint"],            "kali_theharvester"),
+    (["whois", "whois lookup", "domain info"],                                    "kali_whois"),
+    (["vuln scan", "vulnerability scan", "nuclei scan", "scan for vulns"],        "kali_nuclei"),
+    (["dns enum", "dns lookup", "dig dns", "dns records"],                        "kali_dnsenum"),
+    (["dir bust", "directory brute", "gobuster", "find directories", "dir scan"], "kali_gobuster"),
 ]
 
 # Regex patterns for commands that need arg extraction
@@ -265,6 +303,8 @@ def run_action(action_name: str, arg: str = "") -> dict:
             return _file_write(arg)
         if action_name == "project_status":
             return _project_status()
+        if action_name.startswith("kali_"):
+            return _run_kali(action_name, arg)
         if entry["cmd"]:
             cmd = entry["cmd"]
             if "{arg}" in cmd:
