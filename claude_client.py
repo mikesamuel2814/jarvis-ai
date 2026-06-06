@@ -1,11 +1,10 @@
 """
-Jarvis 2.0 — Claude (Anthropic) cloud client.
+Jarvis 2.0 — Claude CLI cloud client.
 
-Drop-in replacement for kimi/client.py while MOONSHOT_API_KEY is unavailable.
-Switch back by changing brain.py's cloud imports to kimi.client.
+Uses the installed Claude Code CLI (claude -p) — no API key required.
+Auth comes from the existing Claude Code session/keychain.
 
-Model: claude-sonnet-4-6  (configurable via jarvis_v2.yaml → claude.model)
-Pricing (Jun 2026): $3/M input · $15/M output (Sonnet 4.6)
+Swap to kimi/client.py when MOONSHOT_API_KEY is available.
 """
 
 from __future__ import annotations
@@ -13,39 +12,27 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 log = logging.getLogger("jarvis.claude_client")
 
 JARVIS_HOME  = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
-SECRETS_FILE = JARVIS_HOME / "config" / "secrets.env"
 CONFIG_FILE  = JARVIS_HOME / "config" / "jarvis_v2.yaml"
 CLAUDE_LOG   = JARVIS_HOME / "logs" / "claude_api.log"
 
-DEFAULT_MODEL   = "claude-sonnet-4-6"
-MAX_TOKENS      = 8192
+DEFAULT_MODEL = "claude-sonnet-4-6"
+CLI_TIMEOUT   = 120  # seconds
 
 # Privacy blocklist — never sent to cloud
 _PRIVACY_BLOCKLIST = [
     "Payment-Gateway", "AsthaCash", ".ssh", "credentials",
     ".env", "secrets", "private_key", "id_rsa", "id_ed25519",
 ]
-
-
-def _load_secret(key: str, default: str = "") -> str:
-    val = os.environ.get(key, "")
-    if val:
-        return val
-    if SECRETS_FILE.exists():
-        for line in SECRETS_FILE.read_text().splitlines():
-            line = line.strip()
-            if line.startswith(f"{key}="):
-                return line.split("=", 1)[1].strip()
-    return default
 
 
 def _load_privacy_blocklist() -> list[str]:
@@ -66,67 +53,89 @@ def _check_privacy(text: str) -> None:
             )
 
 
-class ClaudeClient:
-    """Thread-safe Anthropic Claude API wrapper matching KimiClient interface."""
+def _find_claude() -> str:
+    path = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    if not os.path.exists(path):
+        raise EnvironmentError("claude CLI not found. Install via: npm install -g @anthropic-ai/claude-code")
+    return path
 
-    def __init__(self, api_key: str | None = None) -> None:
-        import anthropic  # lazy — avoids import cost when edge-only
-        key = api_key or _load_secret("ANTHROPIC_API_KEY")
-        if not key or key == "REPLACE_ME":
-            raise EnvironmentError(
-                "ANTHROPIC_API_KEY not set. "
-                "Add it to ~/.jarvis/config/secrets.env"
+
+def _format_history(history: list[dict]) -> str:
+    """Format conversation history as a text block to prepend to the query."""
+    if not history:
+        return ""
+    lines = ["[Conversation context]"]
+    for msg in history[-10:]:  # cap at 10 turns
+        role = msg.get("role", "user").capitalize()
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
             )
+        lines.append(f"{role}: {content[:400]}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+class ClaudeClient:
+    """Runs cloud queries via the Claude Code CLI (claude -p)."""
+
+    def __init__(self) -> None:
+        self._bin = _find_claude()
         cfg = {}
         try:
             raw = yaml.safe_load(CONFIG_FILE.read_text())
-            cfg = raw.get("claude", {}) if raw else {}
+            cfg = (raw or {}).get("claude", {})
         except Exception:
             pass
-
         self._model = cfg.get("model", DEFAULT_MODEL)
-        self._client = anthropic.Anthropic(api_key=key)
         CLAUDE_LOG.parent.mkdir(parents=True, exist_ok=True)
-        self._usage: dict[str, int] = {"input": 0, "output": 0}
+        self._usage: dict[str, int] = {"calls": 0, "chars_out": 0}
 
-    # ── Core completion ───────────────────────────────────────────────
+    # ── Core call ─────────────────────────────────────────────────────
 
     def complete(
         self,
-        messages: list[dict],
-        *,
+        user_message: str,
         system: str = "",
-        max_tokens: int = MAX_TOKENS,
+        *,
+        timeout: int = CLI_TIMEOUT,
     ) -> tuple[str, None]:
         """
-        Call Claude. Returns (content, None) — None for reasoning slot
-        so callers handle it the same way they handle Kimi's reasoning_content.
+        Call Claude CLI non-interactively.
+        Returns (content, None) — None keeps parity with KimiClient interface.
         """
-        t0 = time.time()
-        kwargs: dict[str, Any] = dict(
-            model=self._model,
-            max_tokens=max_tokens,
-            messages=messages,
-        )
+        cmd = [
+            self._bin,
+            "--print",
+            "--model", self._model,
+            "--no-session-persistence",
+        ]
         if system:
-            kwargs["system"] = system
+            cmd += ["--system-prompt", system]
 
+        t0 = time.time()
         try:
-            resp = self._client.messages.create(**kwargs)
-        except Exception as exc:
-            log.error("Claude API error: %s", exc)
-            raise
+            result = subprocess.run(
+                cmd,
+                input=user_message,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Claude CLI timed out after {timeout}s")
 
         elapsed = time.time() - t0
-        content = resp.content[0].text if resp.content else ""
 
-        if resp.usage:
-            inp = resp.usage.input_tokens
-            out = resp.usage.output_tokens
-            self._usage["input"]  += inp
-            self._usage["output"] += out
-            self._log_call(inp, out, elapsed)
+        if result.returncode != 0:
+            err = result.stderr.strip()[:300]
+            raise RuntimeError(f"Claude CLI error (exit {result.returncode}): {err}")
 
+        content = result.stdout.strip()
+        self._usage["calls"] += 1
+        self._usage["chars_out"] += len(content)
+        self._log_call(len(user_message), len(content), elapsed)
         return content, None
 
     def query(
@@ -134,22 +143,20 @@ class ClaudeClient:
         system: str,
         user: str,
         *,
-        thinking: bool = True,  # kept for interface compatibility; ignored
+        thinking: bool = True,   # kept for interface compatibility
         history: list[dict] | None = None,
     ) -> tuple[str, None]:
-        """Convenience wrapper — returns (answer, None)."""
+        """Convenience wrapper matching KimiClient.query() signature."""
         _check_privacy(user)
         _check_privacy(system)
 
-        messages: list[dict] = []
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": user})
+        history_block = _format_history(history or [])
+        full_message = history_block + user if history_block else user
 
-        return self.complete(messages, system=system)
+        return self.complete(full_message, system=system)
 
     def extract_json(self, prompt: str, system: str = "") -> dict:
-        """Ask Claude to return JSON; tolerates markdown fences."""
+        """Ask Claude to return JSON; strips markdown fences."""
         import re
         content, _ = self.query(
             system=system or "Return valid JSON only. No markdown fences, no explanation.",
@@ -159,32 +166,28 @@ class ClaudeClient:
         cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.MULTILINE)
         return json.loads(cleaned)
 
-    # ── Usage / cost helpers ──────────────────────────────────────────
+    # ── Usage helpers ─────────────────────────────────────────────────
 
     def session_cost(self) -> dict:
-        inp = self._usage["input"]
-        out = self._usage["output"]
-        # Sonnet 4.6 pricing: $3/M input, $15/M output
         return {
-            "input_tokens":  inp,
-            "output_tokens": out,
-            "cost_usd": round(inp / 1_000_000 * 3.00 + out / 1_000_000 * 15.00, 4),
+            "calls":     self._usage["calls"],
+            "chars_out": self._usage["chars_out"],
+            "cost_usd":  "N/A (CLI session — billed to Claude plan)",
         }
 
-    def _log_call(self, inp: int, out: int, elapsed: float) -> None:
+    def _log_call(self, chars_in: int, chars_out: int, elapsed: float) -> None:
         entry = {
-            "ts":            int(time.time()),
-            "model":         self._model,
-            "input_tokens":  inp,
-            "output_tokens": out,
-            "cost_usd":      round(inp / 1_000_000 * 3.00 + out / 1_000_000 * 15.00, 6),
-            "elapsed_s":     round(elapsed, 2),
+            "ts":        int(time.time()),
+            "model":     self._model,
+            "chars_in":  chars_in,
+            "chars_out": chars_out,
+            "elapsed_s": round(elapsed, 2),
         }
         with open(CLAUDE_LOG, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
 
-# Module-level singleton (lazy init)
+# Module-level singleton
 _instance: ClaudeClient | None = None
 
 

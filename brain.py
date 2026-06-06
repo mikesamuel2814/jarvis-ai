@@ -242,14 +242,14 @@ def query_cloud(
     full_files: str | None = None,
     thinking: bool = True,
 ) -> str:
-    """Kimi K2.6 — 256K context, deep reasoning."""
-    from kimi.client import get_client, _check_privacy
+    """Claude Sonnet — deep reasoning. Swap import to kimi.client when MOONSHOT_API_KEY is set."""
+    from claude_client import get_client, _check_privacy
 
     _check_privacy(query)
 
     profile = _load_profile()
     system_parts = [
-        "You are Jarvis 2.0, Mike's AI assistant powered by Kimi K2.6.",
+        "You are Jarvis 2.0, Mike's AI assistant.",
         f"Mike's Profile:\n{yaml.dump(profile, allow_unicode=True)[:800]}",
         f"Local Memory Context:\n{rag_context[:3000]}",
     ]
@@ -268,10 +268,10 @@ def query_cloud(
         history=history,
     )
     latency = (time.time() - t0) * 1000
-    log_routing_decision(query, BrainTier.CLOUD, "kimi-k2.6", latency)
+    log_routing_decision(query, BrainTier.CLOUD, "claude-sonnet-4-6", latency)
 
     if reasoning:
-        log.debug("Kimi reasoning trace (%d chars): %s...", len(reasoning), reasoning[:200])
+        log.debug("Cloud reasoning trace (%d chars): %s...", len(reasoning), reasoning[:200])
 
     return content
 
@@ -310,7 +310,7 @@ Return compact JSON: {{"concepts":[], "needs":[], "approach":""}}"""
     local_analysis = re.sub(r"<think>.*?</think>", "", local_analysis, flags=re.DOTALL).strip()
 
     enriched_context = rag_context + "\n\nLocal Pre-Analysis:\n" + local_analysis[:600]
-    log.debug("Hybrid: local pre-analysis done, calling Kimi...")
+    log.debug("Hybrid: local pre-analysis done, calling Claude...")
     return query_cloud(query, enriched_context, history=history, thinking=True)
 
 
@@ -334,7 +334,7 @@ def execute(
             model    = "ollama-local"
         elif tier == BrainTier.CLOUD:
             response = query_cloud(query, rag_context, history=history)
-            model    = "kimi-k2.6"
+            model    = "claude-sonnet-4-6"
         else:
             response = query_hybrid(query, rag_context, history=history)
             model    = "hybrid"
