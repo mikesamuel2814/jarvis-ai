@@ -82,23 +82,20 @@ _brain_router = None
 _guardian = None
 
 
+_TOOL_MODULES = [
+    "tools.core.system", "tools.core.process", "tools.core.file",
+    "tools.core.network", "tools.core.security", "tools.core.security_audit",
+    "tools.core.dev", "tools.core.database", "tools.core.docker",
+    "tools.core.web", "tools.core.backup", "tools.core.automation", "tools.core.comms",
+]
+
+
 def get_tool_registry():
     global _tool_registry
     if _tool_registry is None:
         from tools.registry import ToolRegistry
-        from tools.core.system import *
-        from tools.core.process import *
-        from tools.core.file import *
-        from tools.core.network import *
-        from tools.core.security import *
-        from tools.core.security_audit import *
-        from tools.core.dev import *
-        from tools.core.database import *
-        from tools.core.docker import *
-        from tools.core.web import *
-        from tools.core.backup import *
-        from tools.core.automation import *
-        from tools.core.comms import *
+        for mod in _TOOL_MODULES:
+            __import__(mod)
         _tool_registry = ToolRegistry()
         _tool_registry.index_all()
     return _tool_registry
