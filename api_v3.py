@@ -71,7 +71,7 @@ def _load_secret(key: str, default: str = "") -> str:
 
 API_KEY = _load_secret("JARVIS_API_KEY")
 WEBHOOK_SECRET = _load_secret("JARVIS_WEBHOOK_SECRET")
-API_PORT = int(os.environ.get("API_PORT", "8182"))
+API_PORT = int(os.environ.get("API_PORT", "8181"))
 API_HOST = os.environ.get("JARVIS_HOST", "127.0.0.1")
 
 # ── Lazy imports (avoid loading heavy modules at startup) ───────────
@@ -207,6 +207,25 @@ def run_v2_action(action_name: str, payload: dict = {}, api_key: str = Header(de
     return result
 
 
+# ── v2-compatible action endpoint (used by telegram_bot.py) ─────────
+
+@app.post("/action")
+def action_post(payload: dict = {}, api_key: str = Header(default="")):
+    """v2-compatible action endpoint. Returns {success, output, action, tier, request_id}."""
+    require_api_key(api_key)
+    from tools.compat import run_action
+    action_name = payload.get("action", "")
+    arg = payload.get("arg", "")
+    approved = payload.get("approved", False)
+    result = run_action(action_name, arg=arg, approved=approved)
+    # Add request_id for pending approvals
+    if result.get("needs_approval"):
+        import uuid
+        result["request_id"] = str(uuid.uuid4())[:12]
+        result["status"] = "pending"
+    return result
+
+
 # ── v3 Tool endpoints ───────────────────────────────────────────────
 
 @app.get("/v3/tools")
@@ -310,6 +329,61 @@ def swarm_status(api_key: str = Header(default="")):
         "queue_size": 0,
         "status": "idle",
     }
+
+
+# ── Bot-support endpoints (v2-compatible) ───────────────────────────
+
+@app.post("/claude-plan")
+def claude_plan(payload: dict = {}, api_key: str = Header(default="")):
+    """v2-compatible claude-plan endpoint."""
+    require_api_key(api_key)
+    query = payload.get("query", "")
+    try:
+        from claude_planner import plan_task
+        response = plan_task(query)
+        return {"response": response}
+    except Exception as exc:
+        log.warning("claude-plan error: %s", exc)
+        return {"response": f"Planner error: {exc}"}
+
+
+@app.post("/feedback")
+def feedback_post(payload: dict = {}, api_key: str = Header(default="")):
+    """v2-compatible feedback endpoint."""
+    require_api_key(api_key)
+    # Store feedback for training pipeline
+    feedback_file = JARVIS_HOME / "data" / "feedback.jsonl"
+    feedback_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(feedback_file, "a") as f:
+        f.write(json.dumps({"ts": time.time(), **payload}) + "\n")
+    return {"ok": True}
+
+
+@app.post("/learn")
+def learn_post(api_key: str = Header(default="")):
+    """v2-compatible learn endpoint — triggers training."""
+    require_api_key(api_key)
+    try:
+        subprocess.Popen(
+            [sys.executable, str(JARVIS_HOME / "selftrain_v2.py")],
+            cwd=str(JARVIS_HOME),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {"ok": True, "message": "Training started in background."}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/correct")
+def correct_post(payload: dict = {}, api_key: str = Header(default="")):
+    """v2-compatible correction endpoint."""
+    require_api_key(api_key)
+    corrections_file = JARVIS_HOME / "data" / "corrections.jsonl"
+    corrections_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(corrections_file, "a") as f:
+        f.write(json.dumps({"ts": time.time(), **payload}) + "\n")
+    return {"ok": True}
 
 
 # ── Memory endpoints (v2-compatible) ────────────────────────────────

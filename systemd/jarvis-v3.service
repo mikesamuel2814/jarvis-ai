@@ -1,0 +1,16 @@
+[Unit]
+Description=Jarvis 3.0 Personal AI API
+After=network.target ollama.service
+
+[Service]
+Type=simple
+User=kali
+WorkingDirectory=/home/kali/.jarvis
+EnvironmentFile=-/home/kali/.jarvis/config/secrets.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/kali/.jarvis/venv/bin/python3 /home/kali/.jarvis/api_v3.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Jarvis 3.0 Telegram Bot
+After=network.target jarvis-v3.service
+Wants=jarvis-v3.service
+
+[Service]
+Type=simple
+User=kali
+WorkingDirectory=/home/kali/.jarvis
+ExecStart=/home/kali/.jarvis/venv/bin/python3 /home/kali/.jarvis/telegram_bot.py
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

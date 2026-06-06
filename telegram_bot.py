@@ -23,10 +23,24 @@ import yaml
 from user_facts import facts_prompt_block, load_facts, save_facts, remember_from_message
 
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
-TOKEN_FILE = JARVIS_HOME / "config" / "telegram.json"
 CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
 LOG_FILE = JARVIS_HOME / "logs" / "telegram_bot.log"
 HISTORY_FILE = JARVIS_HOME / "data" / "telegram_history.json"
+_SECRETS_FILE = JARVIS_HOME / "config" / "secrets.env"
+
+# v3: token read from secrets.env (telegram.json deleted in Milestone 0)
+def _load_telegram_token() -> str:
+    """Read TELEGRAM_BOT_TOKEN from env or secrets.env."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if token:
+        return token
+    if _SECRETS_FILE.exists():
+        for line in _SECRETS_FILE.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("TELEGRAM_BOT_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    log.error("TELEGRAM_BOT_TOKEN not found in env or secrets.env")
+    sys.exit(1)
 
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -81,16 +95,8 @@ _load_histories()
 
 
 def load_token():
-    if not TOKEN_FILE.exists():
-        log.error(f"Token file not found: {TOKEN_FILE}")
-        sys.exit(1)
-    with open(TOKEN_FILE) as f:
-        data = json.load(f)
-    token = data.get("bot_token", "")
-    if not token or token == "YOUR_BOT_TOKEN_HERE":
-        log.error("Bot token not set in ~/.jarvis/config/telegram.json")
-        sys.exit(1)
-    return token
+    """Back-compat: now reads from secrets.env via _load_telegram_token."""
+    return _load_telegram_token()
 
 
 def load_config():
