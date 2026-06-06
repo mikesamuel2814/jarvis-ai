@@ -1,0 +1,77 @@
+# Jarvis v3 Feature Flags
+# Toggle components individually for safe rollout.
+
+v3:
+  enabled: false              # Master switch — set true when v3 is ready
+
+  # Core components
+  tool_framework: true        # 127+ @jarvis_tool decorated tools
+  brain_router: true          # 7-tier model routing
+  nano_swarm: true            # Async nano-bot workers
+  orchestrator: true          # Master orchestrator pipeline
+
+  # UI & Communication
+  telegram_ui: true           # Dynamic rich components
+  guardian: true              # 8-dimension proactive monitoring
+
+  # Advanced (deferred)
+  tool_builder: false         # Dynamic tool generation (Milestone 5)
+
+# Model configuration
+models:
+  nano:
+    model: phi4-mini
+    device: cpu
+    max_tokens: 512
+  edge:
+    model: qwen2.5-coder:7b
+    device: gpu
+    max_tokens: 2048
+    lru_cache_size: 3
+  kimi:
+    model: kimi-k2.6
+    enabled: false            # Requires MOONSHOT_API_KEY
+  cloud:
+    model: claude-sonnet-4-6
+    enabled: true
+  swarm:
+    consensus_threshold: 0.8
+    models:
+      - edge
+      - cloud
+      - kimi
+
+# Orchestrator settings
+orchestrator:
+  max_steps: 6
+  timeout_sec: 300
+  default_workers: 50
+
+# Nano-swarm settings
+swarm:
+  worker_count: 50
+  max_workers: 1000
+  queue_size: 10000
+  task_timeout_sec: 60
+  max_retries: 2
+
+# Guardian thresholds
+guardian:
+  intervals:
+    system_resources: 300      # 5 minutes
+    service_health: 300
+    security_posture: 600      # 10 minutes
+    port_anomalies: 120        # 2 minutes
+    secret_health: 3600        # 60 minutes
+    sudo_integrity: 600
+    project_health: 1800       # 30 minutes
+    remote_access: 1800
+
+  thresholds:
+    cpu_percent: 90
+    ram_percent: 85
+    disk_percent: 90
+    gpu_vram_percent: 95
+    nginx_error_rate: 5
+    ssh_failures_per_hour: 10
+    uncommitted_hours: 24
