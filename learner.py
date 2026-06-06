@@ -303,6 +303,7 @@ def run_learning():
     client = chromadb.PersistentClient(path=mem_path)
     collection = client.get_or_create_collection(
         name="jarvis_memory",
+        embedding_function=None,   # We always supply explicit embeddings (1024-dim mxbai).
         metadata={"hnsw:space": "cosine"},
     )
 

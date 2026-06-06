@@ -367,7 +367,7 @@ def get_stats() -> str:
         if uptime:
             lines.append(f"  Uptime  {code(f'{uptime}h')}")
         if top:
-            src_parts = "  ".join(f"{code(esc(k))} {v}" for k, v in top)
+            src_parts = "  ".join(f"{code(k)} {v:,}" for k, v in top)
             lines.append(f"\n{bold('Memory Sources')}\n  {src_parts}")
         return "\n".join(lines)
     except requests.exceptions.ConnectionError:
@@ -417,7 +417,7 @@ def get_sysinfo() -> str:
         model     = st.get("primary_model", "deepseek-r1:7b")
         breakdown = st.get("source_type_breakdown", {})
         top2      = sorted(breakdown.items(), key=lambda x: -x[1])[:3]
-        src       = "  ".join(f"{code(esc(k))} {v}" for k, v in top2)
+        src       = "  ".join(f"{code(k)} {v:,}" for k, v in top2)
 
         def _safe_float(v, default: float = 0.0) -> float:
             try:
@@ -818,52 +818,66 @@ def main():
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(_j.dumps({"chat_id": uid}))
 
-    async def send(update: Update, text: str, parse_mode: str = "HTML", reply_markup=None):
-        """Send text with HTML formatting by default. Auto-converts Markdown.
-        Falls back to plain text if Telegram rejects the HTML.
+    async def send(update: Update, text: str, parse_mode: str = "HTML",
+                   reply_markup=None, already_html: bool = False):
+        """Send text with HTML formatting by default.
+
+        Pass already_html=True when the string was built with fmt helpers
+        (bold/code/esc/etc.) and must NOT be run through _to_html() again —
+        doing so would escape all the tags and show raw HTML to the user.
+
+        Falls back to plain text (all tags stripped) if Telegram rejects the HTML.
         """
-        if parse_mode == "HTML":
-            converted = _to_html(text)
+        if already_html or parse_mode != "HTML":
+            converted = text
         else:
-            converted = _to_legacy_markdown(text)
+            converted = _to_html(text)
         parts = split_message(converted)
         for i, part in enumerate(parts):
             kw = {}
             if reply_markup and i == len(parts) - 1:
                 kw["reply_markup"] = reply_markup
             try:
-                await update.message.reply_text(part, parse_mode=parse_mode, **kw)
+                if update.message:
+                    await update.message.reply_text(part, parse_mode=parse_mode, **kw)
             except Exception:
-                # Fallback: strip HTML tags and send as plain text
+                # Fallback: strip all HTML tags and send as plain text
                 plain = re.sub(r"<[^>]+>", "", part).strip()
-                await update.message.reply_text(plain or "…", **kw)
+                try:
+                    if update.message:
+                        await update.message.reply_text(plain or "…", **kw)
+                except Exception:
+                    pass
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
         _cache_chat_id(uid)
         _histories[uid] = deque(maxlen=MAX_HISTORY)
-        from fmt import bold, italic, esc
+        from fmt import bold, italic
         welcome = (
             f"👋 {bold('Jarvis is online, Sir!')}\n\n"
             f"{italic('Your personal AI brain is ready.')}\n"
             f"I can answer questions, run system commands, search the web, "
             f"analyse images, and manage your projects.\n\n"
-            + HELP_TEXT
+            f"Use the quick-action buttons below, or type any command.\n\n"
+            f"━━━━━━━━━━━━━━━━━\n\n"
         )
-        await send(update, welcome)
+        await send(update, welcome, already_html=True,
+                   reply_markup=_build_reference_keyboard())
+        await send(update, HELP_TEXT, already_html=True)
 
     async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send(update, HELP_TEXT)
+        await send(update, HELP_TEXT, already_html=True)
 
     async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send(update, get_stats())
+        await send(update, get_stats(), already_html=True)
 
     async def health_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await send(update, get_health())
+        await send(update, get_health(), already_html=True)
 
     async def sysinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.chat.send_action("typing")
-        await send(update, get_sysinfo())
+        await send(update, get_sysinfo(), already_html=True)
 
     async def index_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Indexing started, this may take a few minutes...")
@@ -891,36 +905,38 @@ def main():
         facts = load_facts()
         facts[key] = val
         save_facts(facts)
-        await send(update, f"Remembered: *{key}* = {val}")
+        from fmt import bold, code, esc
+        await send(update, f"✅ Remembered: {bold(esc(key))} = {code(esc(val))}", already_html=True)
 
     async def actions_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from executor import ACTIONS, AUTO, CONFIRM, APPROVE
         from fmt import bold, code, esc
         lines = [f"⚡ {bold('Available Actions')}\n"]
         for tier, label, icon in [(AUTO, "Auto", "⚡"), (CONFIRM, "Confirm", "🔔"), (APPROVE, "Approve", "🔐")]:
-            items = [f"  {icon} {code(esc(k))} — {esc(v['desc'])}" for k, v in ACTIONS.items() if v["tier"] == tier]
+            items = [f"  {icon} {code(k)} — {esc(v['desc'])}" for k, v in ACTIONS.items() if v["tier"] == tier]
             if items:
                 lines.append(bold(f"{icon} {label}"))
                 lines.extend(items)
                 lines.append("")
-        await send(update, "\n".join(lines))
+        await send(update, "\n".join(lines), already_html=True)
 
     async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from permissions import list_pending
+        from fmt import bold, code, esc
         pending = list_pending()
         if not pending:
-            await send(update, "No pending approvals.")
+            await send(update, "✅ No pending approvals, Sir.", already_html=True)
             return
-        lines = ["Pending approvals:"]
+        lines = [f"{bold('⏳ Pending Approvals')}\n"]
         for req in pending:
-            lines.append(f"  `{req['id']}` — {req['description']}")
-        await send(update, "\n".join(lines))
+            lines.append(f"  • {code(req['id'])} — {esc(req.get('description', '?'))}")
+        await send(update, "\n".join(lines), already_html=True)
 
     async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from fmt import bold, pre, esc
         args = context.args
         if not args:
-            await send(update, "Usage: /approve <i>REQUEST_ID</i>")
+            await send(update, "Usage: /approve <i>REQUEST_ID</i>", already_html=True)
             return
         req_id = args[0].upper()
         await update.message.chat.send_action("typing")
@@ -931,23 +947,23 @@ def main():
             ok = d.get("success", True)
             icon = "✅" if ok else "❌"
             if output:
-                reply = f"{icon} {bold('Executed')}\n\n{pre(esc(output[:2000]))}"
+                reply = f"{icon} {bold('Executed')}\n\n{pre(output[:2000])}"
             else:
                 reply = f"{icon} {bold('Done.')}"
-            await send(update, reply)
+            await send(update, reply, already_html=True)
         except Exception as e:
-            await send(update, f"Error: {esc(str(e))}")
+            await send(update, f"⚠️ Sorry Sir, approval failed: {esc(str(e))}", already_html=True)
 
     async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        from fmt import esc
+        from fmt import esc, code
         args = context.args
         if not args:
-            await send(update, "Usage: /deny <i>REQUEST_ID</i>")
+            await send(update, "Usage: /deny <i>REQUEST_ID</i>", already_html=True)
             return
         req_id = args[0].upper()
         try:
             requests.post(f"{API_BASE}/deny/{req_id}", headers=_ah(), timeout=10)
-            await send(update, f"❌ Denied: <code>{esc(req_id)}</code>")
+            await send(update, f"❌ Denied: {code(req_id)}", already_html=True)
         except Exception as e:
             log.warning("deny_cmd error: %s", e)
             await send(update, "⚠️ Sorry Sir, the denial request could not be sent.")
@@ -972,8 +988,8 @@ def main():
                 output = d.get("output", "")
                 ok = d.get("success", True)
                 icon = "✅" if ok else "❌"
-                from fmt import bold, pre, esc
-                reply = f"{icon} {bold('Done')}\n\n{pre(esc(output[:1500]))}" if output else f"{icon} {bold('Done.')}"
+                from fmt import bold, pre
+                reply = f"{icon} {bold('Done')}\n\n{pre(output[:1500])}" if output else f"{icon} {bold('Done.')}"
                 await query.edit_message_text(reply, parse_mode="HTML")
             except requests.exceptions.ConnectionError:
                 await query.edit_message_text("⚠️ Sorry Sir, Jarvis API is not reachable right now.")
@@ -1006,7 +1022,7 @@ def main():
                     lines = [f"{icon} {bold('Jarvis Self-Check')} — {bold(esc(overall.upper()))}\n"]
                     checks = d.get("checks", {})
                     for k, v in checks.items():
-                        lines.append(f"  {_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
+                        lines.append(f"  {_check_icon(k, v)} {code(k)}: {code(str(v))}")
                     if not checks:
                         lines.append("  <i>No check data returned.</i>")
                     issues = d.get("issues", [])
@@ -1028,7 +1044,7 @@ def main():
                     log.warning("button learn error: %s", e)
                     reply = "⚠️ Sorry Sir, brain training could not be started."
             elif cmd == "index":
-                reply = "🔄 Indexing started..."
+                reply = "🔄 Indexing started, Sir…"
                 await query.message.reply_text(reply)
                 reply = trigger_index()
             elif cmd == "actions":
@@ -1038,9 +1054,9 @@ def main():
                 conf = [k for k, v in ACTIONS.items() if v["tier"] == CONFIRM]
                 appr = [k for k, v in ACTIONS.items() if v["tier"] == APPROVE]
                 reply = (f"{bold(f'Actions ({len(ACTIONS)} total)')}\n\n"
-                         f"{bold('⚡ AUTO')} ({len(auto)})\n" + "  ".join(code(esc(a)) for a in auto) + "\n\n"
-                         f"{bold('🔔 CONFIRM')} ({len(conf)})\n" + "  ".join(code(esc(a)) for a in conf) + "\n\n"
-                         f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(esc(a)) for a in appr))
+                         f"{bold('⚡ AUTO')} ({len(auto)})\n" + "  ".join(code(a) for a in auto) + "\n\n"
+                         f"{bold('🔔 CONFIRM')} ({len(conf)})\n" + "  ".join(code(a) for a in conf) + "\n\n"
+                         f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(a) for a in appr))
             elif cmd == "pending":
                 try:
                     import json as _j, pathlib as _p
@@ -1050,7 +1066,7 @@ def main():
                         from fmt import bold, code, esc
                         lines = [f"{bold('⏳ Pending Approvals')}\n"]
                         for rid, req in pending.items():
-                            lines.append(f"  • {code(esc(rid))} — {esc(str(req.get('action', '?')))}")
+                            lines.append(f"  • {code(rid)} — {esc(str(req.get('action', '?')))}")
                         reply = "\n".join(lines)
                     else:
                         reply = "✅ No pending approvals, Sir."
@@ -1058,9 +1074,12 @@ def main():
                     log.warning("button pending error: %s", e)
                     reply = "⚠️ Sorry Sir, could not load pending approvals."
             else:
-                reply = f"⚠️ Unknown command: <code>{esc(cmd)}</code>"
+                from fmt import code
+                reply = f"⚠️ Unknown command: {code(cmd)}"
+            # reply is already valid HTML — do NOT run through _to_html()
             try:
-                await query.message.reply_text(_to_html(reply), parse_mode="HTML")
+                for part in split_message(reply):
+                    await query.message.reply_text(part, parse_mode="HTML")
             except Exception:
                 plain = re.sub(r"<[^>]+>", "", reply)
                 await query.message.reply_text(plain or "Done.")
@@ -1069,11 +1088,14 @@ def main():
             action = data[4:]
             await query.message.chat.send_action("typing")
             result = run_action_via_api(action)
+            # run_action_via_api returns Markdown-style text (from _format_action_output)
+            result_html = _to_html(result)
             try:
-                await query.message.reply_text(_to_html(result), parse_mode="HTML")
+                for part in split_message(result_html):
+                    await query.message.reply_text(part, parse_mode="HTML")
             except Exception:
                 # Fallback to plain text if HTML rendering fails
-                plain = re.sub(r"<[^>]+>", "", result)
+                plain = re.sub(r"<[^>]+>", "", result_html)
                 await query.message.reply_text(plain or "Done.")
 
     def _build_reference_keyboard() -> "InlineKeyboardMarkup":
@@ -1200,10 +1222,11 @@ def main():
         if not task:
             await send(update,
                 f"Usage: /task <i>description</i>\n"
-                f"Example: <code>/task fix the typo in gateway-admin index.js line 42</code>"
+                f"Example: <code>/task fix the typo in gateway-admin index.js line 42</code>",
+                already_html=True,
             )
             return
-        await send(update, f"🤖 Queuing Claude Code task:\n{code(esc(task[:200]))}\n\nApproval required to run.")
+        await send(update, f"🤖 Queuing Claude Code task:\n{code(task[:200])}\n\nApproval required to run.", already_html=True)
         try:
             resp = requests.post(f"{API_BASE}/action", json={"action": "claude_task", "arg": task}, headers=_ah(), timeout=10)
             d = resp.json()
@@ -1221,9 +1244,10 @@ def main():
                     parse_mode="HTML",
                 )
             else:
-                await send(update, d.get("output", "Task queued."))
+                await send(update, d.get("output", "✅ Task queued, Sir."))
         except Exception as e:
-            await send(update, f"Error queuing task: {esc(str(e))}")
+            log.warning("task_cmd error: %s", e)
+            await send(update, f"⚠️ Sorry Sir, the task could not be queued. Please try again.")
 
     async def exec_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Smart action dispatch — detect action or plan via claude-plan."""
@@ -1319,11 +1343,24 @@ def main():
         city = " ".join(context.args).strip() if context.args else ""
         query = f"weather in {city}" if city else "weather today"
         from web_search import get_weather
+        from fmt import bold, code, esc, italic
         result = get_weather(query)
         if result:
-            await send(update, f"Sir, {result}")
+            # result is plain text like "Dhaka: Hazy 30°C, humidity 72%, wind 8km/h"
+            # Split into location and conditions for nicer display
+            if ":" in result:
+                location, conditions = result.split(":", 1)
+                formatted = (
+                    f"🌤 {bold(esc(location.strip()))}\n"
+                    f"{esc(conditions.strip())}"
+                )
+            else:
+                formatted = f"🌤 {esc(result)}"
+            await send(update, formatted, already_html=True)
         else:
-            await send(update, "Could not fetch weather, Sir. Try /web weather in <city>")
+            await send(update,
+                f"⚠️ Could not fetch weather, Sir. Try {code('/web weather in &lt;city&gt;')}",
+                already_html=True)
 
     async def browse_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Open a URL in headless Chrome, summarise + optional screenshot."""
@@ -1381,10 +1418,12 @@ def main():
             await update.message.chat.send_action("typing")
             res = oc.tool_invoke(tool, tool_args)
             if res.get("ok"):
+                from fmt import bold, esc
                 out = res.get("output", "") or "Done."
-                await send(update, f"✅ *{tool}*\n{out[:3500]}")
+                await send(update, f"✅ {bold(esc(tool))}\n{esc(out[:3500])}", already_html=True)
             else:
-                await send(update, f"❌ {tool}: {res.get('reason', 'failed')}")
+                from fmt import bold, esc
+                await send(update, f"❌ {bold(esc(tool))}: {esc(res.get('reason', 'failed'))}", already_html=True)
         except Exception as e:
             log.warning("oc_cmd error: %s", e)
             await send(update, "⚠️ Sorry Sir, OpenClaw encountered an error. It may not be running.")
@@ -1413,17 +1452,18 @@ def main():
             by_level: dict[int, list] = {}
             for t in tools:
                 by_level.setdefault(t.get("level", 0), []).append(t)
-            lines = ["Sir, Kali pentest tools (authorized targets only):\n"]
+            from fmt import bold, code, esc
+            lines = [f"Sir, {bold('Kali pentest tools')} (authorized targets only)\n"]
             for lvl in sorted(by_level):
-                lines.append(f"*{level_names.get(lvl, f'Level {lvl}')}*")
+                lines.append(bold(level_names.get(lvl, f"Level {lvl}")))
                 for t in sorted(by_level[lvl], key=lambda x: x["name"]):
                     tier_icon = "⚡" if t["tier"] == "auto" else "🔐"
-                    lines.append(f"  {tier_icon} `{t['name']}` — {t['desc']}")
+                    lines.append(f"  {tier_icon} {code(t['name'])} — {esc(t['desc'])}")
                 lines.append("")
-            lines.append("Usage: `/kali <tool> <target> [opts]`")
-            lines.append("Example: `/kali nmap_quick scanme.nmap.org`")
-            lines.append("Reports land in `~/.jarvis/scans/` (see /scans).")
-            await send(update, "\n".join(lines))
+            lines.append(f"Usage: {code('/kali <tool> <target> [opts]')}")
+            lines.append(f"Example: {code('/kali nmap_quick scanme.nmap.org')}")
+            lines.append(f"Reports land in {code('~/.jarvis/scans/')} (see /scans).")
+            await send(update, "\n".join(lines), already_html=True)
             return
 
         tool = args[0]
@@ -1432,16 +1472,23 @@ def main():
         target = args[1] if len(args) > 1 else ""
         opts = " ".join(args[2:]) if len(args) > 2 else ""
         if not target:
-            await send(update, f"Sir, I need a target.\nUsage: `/kali {tool} <target> [opts]`")
+            from fmt import code, esc
+            await send(update,
+                f"Sir, I need a target.\nUsage: {code(f'/kali {esc(tool)} &lt;target&gt; [opts]')}",
+                already_html=True)
             return
 
         # Scope pre-check so we can warn before anything runs.
         scope_warn = ""
         try:
             from kali_tools import validate_scope
+            from fmt import bold, code, esc
             sc = validate_scope(target)
             if not sc.get("in_scope", True):
-                scope_warn = f"⚠️ *OUT OF SCOPE* target `{target}` — {sc.get('reason','')}\nApproval will be required.\n\n"
+                scope_warn = (
+                    f"⚠️ {bold('OUT OF SCOPE')} target {code(esc(target))} — "
+                    f"{esc(sc.get('reason',''))}\nApproval will be required.\n\n"
+                )
         except Exception:
             pass
 
@@ -1449,7 +1496,10 @@ def main():
         arg = (target + " " + opts).strip()
 
         await update.message.chat.send_action("typing")
-        await send(update, f"{scope_warn}Sir, dispatching `{tool}` against `{target}`...")
+        from fmt import code, esc
+        await send(update,
+            f"{scope_warn}Sir, dispatching {code(esc(tool))} against {code(esc(target))}…",
+            already_html=True)
 
         # Run the (potentially long) scan off the event loop so the bot stays responsive.
         loop = asyncio.get_event_loop()
@@ -1460,16 +1510,19 @@ def main():
             await send(update, "⚠️ Sorry Sir, the scan could not be started. Check logs for details.")
             return
 
-        # run_action_via_api returns a string. For approve-tier it contains the
-        # pending-approval text (with request id); surface it with the scope banner.
-        await send(update, (scope_warn + result) if scope_warn else result)
+        # run_action_via_api returns a Markdown-style string; convert to HTML for display.
+        # Prepend scope_warn (already HTML) if present.
+        result_html = _to_html(result)
+        final = (scope_warn + result_html) if scope_warn else result_html
+        await send(update, final, already_html=True)
 
     async def scans_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """List the last ~10 scan reports in ~/.jarvis/scans/."""
         from datetime import datetime
         scans_dir = JARVIS_HOME / "scans"
+        from fmt import bold, code, esc
         if not scans_dir.exists():
-            await send(update, "Sir, no scans yet — `~/.jarvis/scans/` is empty.")
+            await send(update, f"Sir, no scans yet — {code('~/.jarvis/scans/')} is empty.", already_html=True)
             return
         files = sorted(
             [p for p in scans_dir.iterdir() if p.is_file()],
@@ -1479,15 +1532,15 @@ def main():
         if not files:
             await send(update, "Sir, no scan reports found yet.")
             return
-        lines = ["Sir, latest scan reports:\n"]
+        lines = [f"Sir, {bold('latest scan reports')}\n"]
         for p in files:
             st = p.stat()
             size = st.st_size
             size_h = f"{size}B" if size < 1024 else (f"{size//1024}KB" if size < 1024*1024 else f"{size//(1024*1024)}MB")
             mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"  📄 `{p.name}` — {size_h}, {mtime}")
-        lines.append("\nRead one with `/exec read file <path>` or open in the file viewer.")
-        await send(update, "\n".join(lines))
+            lines.append(f"  📄 {code(esc(p.name))} — {size_h}, {mtime}")
+        lines.append(f"\nRead one with {code('/exec read file &lt;path&gt;')} or open in the file viewer.")
+        await send(update, "\n".join(lines), already_html=True)
 
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from fmt import bold, code, italic, esc
@@ -1502,7 +1555,7 @@ def main():
             checks = d.get("checks", {})
             if checks:
                 for k, v in checks.items():
-                    lines.append(f"  {_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
+                    lines.append(f"  {_check_icon(k, v)} {code(k)}: {code(str(v))}")
             else:
                 lines.append("  <i>No check data returned.</i>")
             issues = d.get("issues", [])
@@ -1512,7 +1565,7 @@ def main():
                     lines.append(f"  • {esc(str(iss))}")
             else:
                 lines.append(f"\n<i>No issues detected.</i>")
-            await send(update, "\n".join(lines))
+            await send(update, "\n".join(lines), already_html=True)
         except requests.exceptions.ConnectionError:
             await send(update, "⚠️ Sorry Sir, Jarvis API is not reachable right now.")
         except Exception as e:
@@ -1657,12 +1710,12 @@ def main():
                     else:
                         await update.message.reply_text(part, parse_mode="HTML")
                 except Exception:
-                    # Fallback: send as plain text if HTML parse fails
-                    plain = part.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "").replace("<code>", "").replace("</code>", "")
+                    # Fallback: strip ALL HTML tags and send as plain text
+                    plain = re.sub(r"<[^>]+>", "", part).strip()
                     if i == 0:
-                        await thinking_msg.edit_text(plain)
+                        await thinking_msg.edit_text(plain or "…")
                     else:
-                        await update.message.reply_text(plain)
+                        await update.message.reply_text(plain or "…")
             # Show feedback buttons after the last part (only for logged interactions)
             if iid:
                 await update.message.reply_text(

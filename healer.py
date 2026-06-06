@@ -98,9 +98,16 @@ def check_service(svc: str) -> bool:
 
 
 def restart_service(svc: str) -> tuple[bool, str]:
-    """Attempt service restart. Returns (success, output)."""
+    """Attempt service restart. Returns (success, output).
+
+    Uses 'systemctl restart' (not 'start') because:
+    - sudoers grants NOPASSWD restart for all three managed services
+      but only grants NOPASSWD start for jarvis/jarvis-telegram/openclaw — NOT ollama.
+    - The -n flag makes sudo fail fast (non-TTY cron context) rather than hanging
+      on a password prompt until the 30s timeout expires.
+    """
     r = subprocess.run(
-        ["sudo", "systemctl", "start", svc],
+        ["sudo", "-n", "systemctl", "restart", svc],
         capture_output=True,
         text=True,
         timeout=30,

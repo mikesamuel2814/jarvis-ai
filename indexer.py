@@ -416,6 +416,7 @@ def run_indexing(config):
     client = get_chroma_client(config)
     collection = client.get_or_create_collection(
         name="jarvis_memory",
+        embedding_function=None,   # We always supply explicit 1024-dim embeddings (mxbai).
         metadata={"hnsw:space": "cosine"},
     )
 
@@ -482,6 +483,7 @@ def main():
     client = get_chroma_client(config)
     collection = client.get_or_create_collection(
         name="jarvis_memory",
+        embedding_function=None,   # We always supply explicit 1024-dim embeddings (mxbai).
         metadata={"hnsw:space": "cosine"},
     )
 
