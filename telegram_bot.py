@@ -819,7 +819,9 @@ def main():
             cache.write_text(_j.dumps({"chat_id": uid}))
 
     async def send(update: Update, text: str, parse_mode: str = "HTML", reply_markup=None):
-        """Send text with HTML formatting by default. Auto-converts Markdown."""
+        """Send text with HTML formatting by default. Auto-converts Markdown.
+        Falls back to plain text if Telegram rejects the HTML.
+        """
         if parse_mode == "HTML":
             converted = _to_html(text)
         else:
@@ -829,7 +831,12 @@ def main():
             kw = {}
             if reply_markup and i == len(parts) - 1:
                 kw["reply_markup"] = reply_markup
-            await update.message.reply_text(part, parse_mode=parse_mode, **kw)
+            try:
+                await update.message.reply_text(part, parse_mode=parse_mode, **kw)
+            except Exception:
+                # Fallback: strip HTML tags and send as plain text
+                plain = re.sub(r"<[^>]+>", "", part).strip()
+                await update.message.reply_text(plain or "…", **kw)
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
