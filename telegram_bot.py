@@ -1981,8 +1981,6 @@ def main():
         """Generate Sir's daily intelligence briefing."""
         uid = update.effective_user.id
         _cache_chat_id(uid)
-        if not _is_authorized(uid):
-            return
         thinking_msg = await update.message.reply_text("📋 Generating briefing…")
         try:
             from thinking_engine import generate_briefing
@@ -1996,8 +1994,6 @@ def main():
         """Deep multi-step reasoning on a question. /think <question>"""
         uid = update.effective_user.id
         _cache_chat_id(uid)
-        if not _is_authorized(uid):
-            return
         query = " ".join(context.args).strip() if context.args else ""
         if not query:
             await send(update, "Sir, provide a question: `/think <your question>`")
@@ -2031,8 +2027,6 @@ def main():
         """Autonomous agent: /do <task> — Jarvis plans, runs safe actions, reports back."""
         uid = update.effective_user.id
         _cache_chat_id(uid)
-        if not _is_authorized(uid):
-            return
         task = " ".join(context.args).strip() if context.args else ""
         if not task:
             await send(update, "Sir, give me a task: `/do <what you want done>`\n"
