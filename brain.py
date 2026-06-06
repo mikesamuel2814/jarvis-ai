@@ -277,8 +277,28 @@ def _dedup_paragraphs(text: str) -> str:
     return "\n\n".join(seen)
 
 
-def query_edge(query: str, rag_context: str, history: list[dict] | None = None) -> str:
-    """Local Ollama — zero cost, zero latency."""
+_FINAL_FALLBACK_MSG = (
+    "I couldn't find a reliable answer right now, Sir. "
+    "Try /probe to test the local brain directly, or /recall to check memory. "
+    "If this keeps happening, run /learn to retrain."
+)
+
+
+def _is_useless_response(text: str) -> bool:
+    """True if the model returned a non-answer (empty, too short, or a canned refusal)."""
+    if not text or len(text.strip()) < 10:
+        return True
+    junk = [
+        "i don't know", "i cannot", "as an ai", "i'm unable",
+        "i apologize", "i'm sorry, i don't", "not able to",
+        "i do not have", "i have no information",
+    ]
+    tl = text.lower().strip()
+    return any(tl.startswith(p) for p in junk) and len(text) < 120
+
+
+def query_edge(query: str, rag_context: str, history: list[dict] | None = None) -> str | None:
+    """Local Ollama — zero cost, zero latency. Returns None on failure."""
     import ollama
 
     cfg = _load_config()
@@ -288,6 +308,8 @@ def query_edge(query: str, rag_context: str, history: list[dict] | None = None) 
     opts.setdefault("num_keep", 256)
     opts.setdefault("num_predict", 1024)
     opts.setdefault("temperature", 0.3)
+    opts.setdefault("repeat_penalty", 1.15)
+    opts.setdefault("repeat_last_n", 128)
     opts["num_ctx"] = min(int(opts.get("num_ctx", 2048)), 2048)
 
     ql = query.lower()
@@ -315,15 +337,17 @@ def query_edge(query: str, rag_context: str, history: list[dict] | None = None) 
     messages.append({"role": "user", "content": f"{rag_prefix}{query}"})
 
     t0 = time.time()
-    with _ollama_lock:
-        client = ollama.Client(
-            host=ollama_cfg.get("host", "http://localhost:11434")
-        )
-        resp = client.chat(model=model, messages=messages, options=opts)
-    content = resp["message"]["content"]
-    # Post-process: remove consecutive repeated paragraphs (guards against
-    # infinite-loop outputs that repeat the same paragraph 20+ times).
-    content = _dedup_paragraphs(content)
+    try:
+        with _ollama_lock:
+            client = ollama.Client(
+                host=ollama_cfg.get("host", "http://localhost:11434")
+            )
+            resp = client.chat(model=model, messages=messages, options=opts)
+        content = resp["message"]["content"]
+        content = _dedup_paragraphs(content)
+    except Exception as exc:
+        log.warning("query_edge failed (model=%s): %s", model, exc)
+        return None
     latency = (time.time() - t0) * 1000
     log_routing_decision(query, BrainTier.EDGE, model, latency)
     return content
@@ -427,6 +451,10 @@ def execute(
     else:
         tier = route(query, history=history)
 
+    response: str | None = None
+    model = "unknown"
+
+    # ── Tier 1: attempt routed tier ────────────────────────────────
     try:
         if tier == BrainTier.EDGE:
             response = query_edge(query, rag_context, history=history)
@@ -441,9 +469,31 @@ def execute(
             response = query_hybrid(query, rag_context, history=history)
             model    = "hybrid"
     except Exception as exc:
-        log.error("Brain execution failed (tier=%s): %s. Falling back to Edge.", tier.value, exc)
-        response = query_edge(query, rag_context, history=history)
-        tier     = BrainTier.EDGE
-        model    = "ollama-local (fallback)"
+        log.warning("Brain tier %s failed: %s — trying fallbacks", tier.value, exc)
+
+    # ── Tier 2: edge fallback (if routed tier wasn't already edge) ─
+    if (response is None or _is_useless_response(response)) and tier != BrainTier.EDGE:
+        log.warning("Falling back to edge (local) model")
+        try:
+            response = query_edge(query, rag_context, history=history)
+            model    = "ollama-local (fallback)"
+        except Exception as exc:
+            log.warning("Edge fallback failed: %s", exc)
+            response = None
+
+    # ── Tier 3: cloud fallback (last resort, privacy-permitting) ───
+    if response is None or _is_useless_response(response):
+        log.warning("Edge gave no useful answer — escalating to cloud")
+        try:
+            response = query_cloud(query, rag_context, history=history)
+            model    = "cloud (fallback)"
+        except Exception as exc:
+            log.warning("Cloud fallback failed: %s", exc)
+            response = None
+
+    # ── Final: friendly message if everything failed ───────────────
+    if not response or _is_useless_response(response):
+        response = _FINAL_FALLBACK_MSG
+        model    = "fallback-message"
 
     return {"response": response, "tier": tier.value, "model": model}

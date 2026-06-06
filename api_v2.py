@@ -721,6 +721,30 @@ async def voice_speak(req: VoiceRequest):
         return {"ok": False, "error": str(e)}
 
 
+class MemorySaveRequest(BaseModel):
+    text: str
+    metadata: dict = {}
+
+@app.post("/memory/save", dependencies=[Depends(require_api_key)])
+async def memory_save(req: MemorySaveRequest):
+    """Save a text chunk directly to ChromaDB memory."""
+    try:
+        import chromadb, hashlib
+        import ollama as _ol
+        db_path = str(JARVIS_HOME / "memory")
+        _client = chromadb.PersistentClient(path=db_path)
+        col = _client.get_or_create_collection("jarvis_memory", embedding_function=None)
+        emb_resp = _ol.embeddings(model="mxbai-embed-large", prompt=req.text[:4096], options={"keep_alive": 0})
+        emb = emb_resp["embedding"]
+        doc_id = hashlib.sha256(req.text.encode()).hexdigest()[:16]
+        meta = {**req.metadata, "saved_at": datetime.now().isoformat()}
+        col.upsert(ids=[doc_id], embeddings=[emb], documents=[req.text], metadatas=[meta])
+        return {"saved": True, "id": doc_id}
+    except Exception as e:
+        log.warning("memory/save failed: %s", e)
+        return {"saved": False, "error": str(e)}
+
+
 @app.post("/memory/sync", dependencies=[Depends(require_api_key)])
 async def memory_sync(req: MemorySyncRequest | None = None):
     """Bidirectional sync between ChromaDB and OpenClaw workspace."""

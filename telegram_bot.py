@@ -856,6 +856,19 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         return "⚠️ Sorry Sir, the action could not be completed. Check logs for details."
 
 
+def _auto_save_interaction(uid: int, query: str, response: str) -> None:
+    """Fire-and-forget: save interaction to Jarvis memory. Called as thread to avoid blocking."""
+    try:
+        from datetime import datetime as _dt
+        payload = {
+            "text": f"Q: {query[:500]}\nA: {response[:500]}",
+            "metadata": {"type": "interaction", "uid": str(uid), "date": _dt.now().isoformat()[:10]}
+        }
+        requests.post(f"{API_BASE}/memory/save", json=payload, headers=_ah(), timeout=5)
+    except Exception:
+        pass
+
+
 def main():
     try:
         from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup

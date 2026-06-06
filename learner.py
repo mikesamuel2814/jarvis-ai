@@ -45,6 +45,11 @@ CORRECTIONS_LOG  = JARVIS_HOME / "data" / "corrections.jsonl"
 LESSONS_LOG      = JARVIS_HOME / "data" / "lessons.jsonl"
 DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
 TRAINING_LOG     = TRAINING_LOG_FOR_LOG
+SKILLS_DIR       = JARVIS_HOME / "skills"
+SKILL_GAPS_LOG   = SKILLS_DIR / "gaps.jsonl"
+SKILLS_LOG       = SKILLS_DIR / "skills.jsonl"
+INBOX_DIR        = JARVIS_HOME / "inbox"
+INBOX_PROCESSED  = INBOX_DIR / "processed"
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -290,6 +295,68 @@ def print_stats():
     print("=" * 42)
 
 
+def detect_skill_gaps(interactions: list[dict]) -> int:
+    """Log topics where Jarvis failed 3+ times as skills needing training."""
+    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    bad = [i for i in interactions if i.get("rating") in ("bad", "thumbs_down", -1, 0)]
+    topic_fails: dict[str, int] = {}
+    keywords = ["code", "deploy", "error", "system", "memory", "project",
+                "web", "kali", "docker", "nginx", "vps", "ssh", "git",
+                "identity", "jarvis", "weather", "voice", "action"]
+    for entry in bad:
+        q = entry.get("query", "").lower()
+        matched = next((kw for kw in keywords if kw in q), "general")
+        topic_fails[matched] = topic_fails.get(matched, 0) + 1
+        gap = {"date": datetime.now().isoformat()[:10], "topic": matched,
+               "query": entry.get("query", "")[:150], "gap_type": "wrong_answer"}
+        try:
+            with open(SKILL_GAPS_LOG, "a") as f:
+                f.write(json.dumps(gap) + "\n")
+        except Exception:
+            pass
+    promoted = 0
+    for topic, count in topic_fails.items():
+        if count >= 3:
+            skill = {"date": datetime.now().isoformat()[:10], "topic": topic,
+                     "fail_count": count, "status": "needs_training"}
+            try:
+                with open(SKILLS_LOG, "a") as f:
+                    f.write(json.dumps(skill) + "\n")
+            except Exception:
+                pass
+            promoted += 1
+    return promoted
+
+
+def auto_digest_inbox(collection, embed_model: str) -> int:
+    """Index any files dropped into ~/.jarvis/inbox/ into ChromaDB knowledge."""
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    INBOX_PROCESSED.mkdir(parents=True, exist_ok=True)
+    digested = 0
+    for fpath in INBOX_DIR.iterdir():
+        if fpath.suffix.lower() not in (".txt", ".md", ".json") or not fpath.is_file():
+            continue
+        try:
+            text = fpath.read_text(errors="replace")[:20000]
+            chunks = [text[i:i+800] for i in range(0, len(text), 700)]
+            for chunk in chunks:
+                if len(chunk.strip()) < 20:
+                    continue
+                emb = _embed(chunk, embed_model)
+                if emb is None:
+                    continue
+                cid = _chunk_id("inbox", chunk)
+                collection.upsert(ids=[cid], embeddings=[emb], documents=[chunk],
+                                  metadatas=[{"source_type": "inbox", "source": str(fpath.name),
+                                              "indexed_at": datetime.now().isoformat()}])
+            fpath.rename(INBOX_PROCESSED / fpath.name)
+            log(f"  [inbox] digested {fpath.name} ({len(chunks)} chunks)")
+            digested += 1
+        except Exception as e:
+            log(f"  [inbox] failed {fpath.name}: {e}")
+    return digested
+
+
 def run_learning():
     import chromadb  # noqa: PLC0415 — lazy import avoids segfault in --stats mode
     import ollama  # noqa: PLC0415
@@ -418,7 +485,32 @@ def run_learning():
     except Exception:
         pass
 
-    log(f"Learner: done. +{lessons_added} lessons, +{golden_added} golden examples. Memory: {collection.count()} chunks total.")
+    # Auto-detect skill gaps from bad interactions
+    gaps_promoted = detect_skill_gaps(interactions)
+    if gaps_promoted:
+        log(f"  [skills] {gaps_promoted} topics promoted to needs_training")
+
+    # Digest any files dropped into ~/.jarvis/inbox/
+    inbox_count = auto_digest_inbox(collection, embed_model)
+    if inbox_count:
+        log(f"  [inbox] {inbox_count} files digested into memory")
+
+    # Save a session summary chunk to memory
+    summary = (
+        f"Training session {datetime.now().isoformat()[:10]}: "
+        f"+{lessons_added} lessons, +{golden_added} golden examples, "
+        f"{gaps_promoted} skill gaps flagged, {inbox_count} inbox files ingested. "
+        f"Memory total: {collection.count()} chunks."
+    )
+    emb = _embed(summary, embed_model)
+    if emb is not None:
+        collection.upsert(
+            ids=[_chunk_id("session", summary)],
+            embeddings=[emb], documents=[summary],
+            metadatas=[{"source_type": "session_summary", "date": datetime.now().isoformat()[:10]}],
+        )
+
+    log(f"Learner: done. +{lessons_added} lessons, +{golden_added} golden, {inbox_count} inbox. Memory: {collection.count()} chunks total.")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@
 echo "[$(date)] Starting Jarvis training cycle..."
 LOG="$HOME/.jarvis/logs/training.log"
 mkdir -p "$HOME/.jarvis/logs"
+echo "[$(date)] Generating pre-training guide..." | tee -a "$LOG"
+"$HOME/.jarvis/venv/bin/python3" "$HOME/.jarvis/train_guide.py" >> "$LOG" 2>&1
 export PYTHONUNBUFFERED=1
 DOCKER_DIR="$HOME/.jarvis/docker"
 if command -v docker >/dev/null 2>&1 \
