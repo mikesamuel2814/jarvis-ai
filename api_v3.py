@@ -71,6 +71,7 @@ def _load_secret(key: str, default: str = "") -> str:
 
 API_KEY = _load_secret("JARVIS_API_KEY")
 WEBHOOK_SECRET = _load_secret("JARVIS_WEBHOOK_SECRET")
+log.info("API_KEY loaded (len=%d, prefix=%s)", len(API_KEY), API_KEY[:8] if API_KEY else "EMPTY")
 API_PORT = int(os.environ.get("API_PORT", "8181"))
 API_HOST = os.environ.get("JARVIS_HOST", "127.0.0.1")
 
