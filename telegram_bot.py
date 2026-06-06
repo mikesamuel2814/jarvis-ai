@@ -359,73 +359,62 @@ def get_sysinfo() -> str:
     """Full system stats card — minimal, one screen."""
     try:
         si = requests.get(f"{API_BASE}/sysinfo", headers=_ah(), timeout=15).json()
-        st = requests.get(f"{API_BASE}/stats", headers=_ah(), timeout=10).json()
-        hl = requests.get(f"{API_BASE}/health", timeout=10).json()
+        st = requests.get(f"{API_BASE}/stats",   headers=_ah(), timeout=10).json()
+        hl = requests.get(f"{API_BASE}/health",                 timeout=10).json()
 
-        cpu = si.get("cpu", {})
-        ram = si.get("ram", {})
-        disk = si.get("disk", {})
-        gpu = si.get("gpu", {})
-        net = si.get("network", {})
-        osinfo = si.get("os", {})
-        jarvis = si.get("jarvis", {})
-
-        svc_ok = hl.get("status") == "healthy"
+        svc_ok   = hl.get("status") in ("ok", "healthy")
         svc_icon = "✅" if svc_ok else "⚠️"
 
-        chunks = st.get("total_chunks", st.get("memory_chunks", 0))
-        model = st.get("primary_model", st.get("model", "deepseek-r1:7b"))
+        chunks    = st.get("total_chunks", st.get("memory_chunks", 0))
+        model     = st.get("primary_model", "deepseek-r1:7b")
         breakdown = st.get("source_type_breakdown", {})
-        top2 = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
-        src = "  ".join(f"`{k}:{v}`" for k, v in top2)
+        top2      = sorted(breakdown.items(), key=lambda x: -x[1])[:2]
+        src       = "  ".join(f"`{k}:{v}`" for k, v in top2)
+
+        cpu_pct  = si.get("cpu_percent", "?")
+        cores    = si.get("cpu_cores", "?")
+        threads  = si.get("cpu_threads", "?")
+        ram_used = si.get("ram_used_gb", "?")
+        ram_tot  = si.get("ram_total_gb", "?")
+        ram_pct  = si.get("ram_percent", 0)
+        d_used   = si.get("disk_used_gb", "?")
+        d_tot    = si.get("disk_total_gb", "?")
+        d_pct    = si.get("disk_percent", 0)
+        gpu_util = si.get("gpu_util_percent")
+        gpu_used = si.get("gpu_mem_used_mb")
+        gpu_tot  = si.get("gpu_mem_total_mb")
+        gpu_temp = si.get("gpu_temp_c")
+        uptime   = si.get("uptime_hours", "?")
+        hostname = si.get("hostname", "kali")
 
         lines = [
             f"*Jarvis Stats* {svc_icon}",
             "",
             "*Brain*",
             f"  Model: `{model}`  Memory: `{chunks:,}` chunks",
-            f"  {src}",
-            "",
-            "*Hardware*",
         ]
+        if src:
+            lines.append(f"  {src}")
+        lines += ["", "*Hardware*"]
 
-        if cpu:
+        lines.append(
+            f"  CPU `{cpu_pct}%` {_bar(float(cpu_pct) if str(cpu_pct) != '?' else 0)}  "
+            f"`{cores}c/{threads}t`"
+        )
+        lines.append(
+            f"  RAM `{ram_used}/{ram_tot} GB` {_bar(float(ram_pct))}"
+        )
+        lines.append(
+            f"  Disk `{d_used}/{d_tot} GB` {_bar(float(d_pct))}"
+        )
+        if gpu_util is not None:
+            vram_pct = round(gpu_used / max(gpu_tot, 1) * 100) if gpu_used and gpu_tot else 0
             lines.append(
-                f"  CPU `{cpu.get('usage_percent', '?')}%` {_bar(cpu.get('usage_percent', 0))}  "
-                f"`{cpu.get('cores_physical', '?')}c/{cpu.get('cores_logical', '?')}t`"
-            )
-        if ram:
-            lines.append(
-                f"  RAM `{ram.get('used_gb', '?')}/{ram.get('total_gb', '?')} GB` "
-                f"{_bar(ram.get('usage_percent', 0))}"
-            )
-        if disk:
-            lines.append(
-                f"  Disk `{disk.get('used_gb', '?')}/{disk.get('total_gb', '?')} GB` "
-                f"{_bar(disk.get('usage_percent', 0))}"
-            )
-        if gpu:
-            vram_pct = round(gpu.get("vram_used_mb", 0) / max(gpu.get("vram_total_mb", 1), 1) * 100)
-            lines.append(
-                f"  GPU `{gpu.get('utilization_percent', '?')}%` {_bar(gpu.get('utilization_percent', 0))}  "
-                f"VRAM `{gpu.get('vram_used_mb', '?')}/{gpu.get('vram_total_mb', '?')} MB`  "
-                f"`{gpu.get('temp_c', '?')}°C`"
+                f"  GPU `{gpu_util}%` {_bar(gpu_util)}  "
+                f"VRAM `{gpu_used}/{gpu_tot} MB` {_bar(vram_pct)}  `{gpu_temp}°C`"
             )
 
-        if net:
-            ts = net.get("tailscale0", "")
-            local = net.get("eth0") or net.get("wlan0", "")
-            net_line = "  "
-            if local:
-                net_line += f"LAN `{local}`"
-            if ts:
-                net_line += f"  VPN `{ts}`"
-            if net_line.strip():
-                lines += ["", "*Network*", net_line]
-
-        uptime = osinfo.get("uptime_hours", "?")
-        lines += ["", f"_Uptime {uptime}h — {osinfo.get('hostname', 'kali')}_"]
-
+        lines += ["", f"_Uptime {uptime}h — {hostname}_"]
         return "\n".join(lines)
     except Exception as e:
         return f"Could not fetch stats: {e}"
