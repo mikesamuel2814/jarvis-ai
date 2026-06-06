@@ -1115,10 +1115,10 @@ def main():
             return
         thinking_msg = await update.message.reply_text(f"🌐 Opening {url} ...")
         try:
-            from browser.agent import BrowserAgent
+            from browser.agent import BrowserAgent, quit_browser
             agent = BrowserAgent.get()
-            page_text = agent.open_url(url)
-            title = agent.get_title()
+            page = agent.fetch(url, want_screenshot=want_shot)
+            page_text, title, png = page["text"], page["title"], page["png"]
 
             import claude_client
             system = (
@@ -1132,11 +1132,15 @@ def main():
             )
             await thinking_msg.edit_text(_to_legacy_markdown(summary), parse_mode="Markdown")
 
-            if want_shot:
-                png = agent.screenshot()
+            if want_shot and png:
                 await update.message.reply_photo(photo=png, caption=f"📸 {title[:80]}")
         except Exception as e:
             await thinking_msg.edit_text(f"Browse error: {e}")
+        finally:
+            try:
+                quit_browser()  # close browser after each /browse → zero idle CPU
+            except Exception:
+                pass
 
     async def oc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """OpenClaw gateway — status or direct tool invoke.

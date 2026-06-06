@@ -98,19 +98,29 @@ def research(query: str, num_results: int = 3, scrape_top: int = 2) -> dict:
     Returns {query, sources, context, elapsed}.
     """
     t0 = time.time()
-    results = search(query, num=num_results)
-    sources = []
+    try:
+        results = search(query, num=num_results)
+        sources = []
 
-    for i, r in enumerate(results):
-        full_text = ""
-        if i < scrape_top and r.get("url"):
-            full_text = scrape(r["url"])
-        sources.append({
-            "title":     r.get("title", ""),
-            "url":       r.get("url", ""),
-            "snippet":   r.get("snippet", ""),
-            "full_text": full_text,
-        })
+        for i, r in enumerate(results):
+            full_text = ""
+            if i < scrape_top and r.get("url"):
+                full_text = scrape(r["url"])
+            sources.append({
+                "title":     r.get("title", ""),
+                "url":       r.get("url", ""),
+                "snippet":   r.get("snippet", ""),
+                "full_text": full_text,
+            })
+    finally:
+        # Close the headless browser after each research task → zero idle CPU.
+        # Per-task open/close is the right trade-off for an occasional-query bot;
+        # a resident chromium would otherwise sit warm burning CPU between calls.
+        try:
+            from browser.agent import quit_browser
+            quit_browser()
+        except Exception:
+            pass
 
     ctx_parts = [f"Web search results for: {query}\n"]
     for i, s in enumerate(sources, 1):

@@ -38,7 +38,7 @@ _CHROMEDRIVER    = "/usr/bin/chromedriver"
 _PAGE_TIMEOUT    = 20_000   # ms
 _IMPLICIT_WAIT   = 8        # seconds
 _MAX_ATTEMPTS    = 3        # open_url tries (1 + 2 fresh-driver crash retries)
-_IDLE_TIMEOUT    = 120      # seconds of inactivity → auto-close the browser
+_IDLE_TIMEOUT    = 30       # seconds of inactivity → auto-close the browser (CPU backstop)
 
 # Substrings that indicate the renderer/tab died and the driver is unusable.
 _CRASH_MARKERS = (
@@ -251,7 +251,7 @@ class BrowserAgent:
         """Auto-close the resident browser after _IDLE_TIMEOUT of inactivity, so
         a warmed-up session left on a heavy SPA page never spins CPU forever."""
         while True:
-            time.sleep(15)
+            time.sleep(10)
             with self._driver_lock:
                 if self._driver is None:
                     return  # nothing to watch; exit thread
@@ -308,8 +308,48 @@ class BrowserAgent:
                         )
                         continue
                     log.warning("open_url(%s) failed: %s", url, exc)
+                    # Terminal failure: reap the crashed/dead proc tree NOW so a
+                    # spinning renderer doesn't linger until idle-reaper/quit.
+                    _hard_kill_driver(self._driver)
+                    self._driver = None
                     return ""
             return ""
+
+    def fetch(self, url: str, want_screenshot: bool = False) -> dict:
+        """Navigate and atomically return {text, title, png} while the page is
+        still loaded, THEN park to about:blank. Use this instead of
+        open_url()+get_title()+screenshot(), which would see the parked blank
+        page. Same crash-retry semantics as open_url()."""
+        with self._driver_lock:
+            for attempt in range(1, _MAX_ATTEMPTS + 1):
+                self._ensure_driver(force=(attempt > 1))
+                try:
+                    self._driver.get(url)
+                    time.sleep(1.5)
+                    title = ""
+                    try:
+                        title = self._driver.title
+                    except Exception:
+                        pass
+                    text = self._extract_text()
+                    png = b""
+                    if want_screenshot:
+                        try:
+                            png = self._driver.get_screenshot_as_png()
+                        except Exception:
+                            png = b""
+                    self._park()
+                    return {"text": text, "title": title, "png": png}
+                except Exception as exc:
+                    if attempt < _MAX_ATTEMPTS and _is_crash(exc):
+                        log.warning("fetch(%s) crash (attempt %d/%d) — retrying",
+                                    url, attempt, _MAX_ATTEMPTS)
+                        continue
+                    log.warning("fetch(%s) failed: %s", url, exc)
+                    _hard_kill_driver(self._driver)
+                    self._driver = None
+                    return {"text": "", "title": "", "png": b""}
+            return {"text": "", "title": "", "png": b""}
 
     def _extract_text(self) -> str:
         """Extract clean text from current page HTML via trafilatura.
@@ -380,6 +420,8 @@ class BrowserAgent:
                         )
                         continue
                     log.error("google_search failed: %s", exc)
+                    _hard_kill_driver(self._driver)   # reap crashed tree immediately
+                    self._driver = None
                     return []
             return []
 
