@@ -41,8 +41,18 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Planning model — small, fast, fits 6GB VRAM, reliable structured output.
-PLAN_MODEL = os.environ.get("JARVIS_AGENT_MODEL", "qwen2.5-coder:3b")
+# Planning model — qwen2.5-coder:7b: accurate action selection + stable with
+# structured outputs, BUT only when the prompt is small (the full 69-action
+# catalog segfaults llama-server on the 6GB card). We keep prompts small by
+# relevance-filtering the catalog, and fall back to the 3b on any crash.
+PLAN_MODEL     = os.environ.get("JARVIS_AGENT_MODEL", "qwen2.5-coder:7b")
+FALLBACK_MODEL = os.environ.get("JARVIS_AGENT_FALLBACK", "qwen2.5-coder:3b")
+
+# Core read-only actions always offered so simple asks never miss.
+_CORE_ACTIONS = ["disk", "memory", "gpu", "services", "pm2_status",
+                 "nginx_status", "uptime", "project_status"]
+# Max actions shown to the planner (small prompt = stable 7b on 6GB VRAM).
+_MAX_CATALOG = 16
 OLLAMA_HOST = "http://localhost:11434"
 
 # Decision schema the planner must return every step.
@@ -61,29 +71,69 @@ _STEP_SCHEMA = {
 
 # ── Tool catalog (reuse executor's whitelisted actions) ───────────────────────
 
-def _tool_catalog(allow_destructive: bool) -> tuple[str, set[str]]:
-    """Return (catalog_text, allowed_action_names).
+_STOPWORDS = {"the", "a", "an", "is", "are", "on", "to", "of", "and", "in", "my",
+              "me", "do", "run", "check", "get", "show", "tell", "if", "it", "for",
+              "what", "whats", "how", "can", "you", "please", "now", "this", "that"}
 
-    Read-only AUTO actions are always offered. CONFIRM/APPROVE actions are only
-    listed when allow_destructive=True (they still pass through the autonomy gate
-    before running).
+
+def _score_action(task_tokens: set[str], name: str, desc: str) -> int:
+    """Keyword-overlap score between the task and an action's name + description."""
+    name_tokens = set(re.split(r"[_\s]+", name.lower()))
+    desc_tokens = set(re.findall(r"[a-z0-9]+", desc.lower()))
+    score = 0
+    for t in task_tokens:
+        if t in name_tokens:
+            score += 3            # name match is strongest signal
+        elif t in desc_tokens:
+            score += 1
+    return score
+
+
+def _tool_catalog(allow_destructive: bool, task: str = "") -> tuple[str, set[str]]:
+    """Return (catalog_text, allowed_action_names) — relevance-filtered.
+
+    Read-only AUTO actions are candidates always; CONFIRM/APPROVE only when
+    allow_destructive. The list is trimmed to the most relevant ~16 actions for
+    the task so the planner prompt stays small (keeps the 7b stable on 6GB VRAM)
+    and accurate (fewer distractors). Core read-only actions are always included.
     """
     from executor import ACTIONS, AUTO
 
-    lines, allowed = [], set()
-    auto_lines, other_lines = [], []
+    task_tokens = {t for t in re.findall(r"[a-z0-9]+", task.lower())
+                   if t not in _STOPWORDS and len(t) > 1}
+
+    candidates = []  # (score, name, desc, tier)
     for name, entry in ACTIONS.items():
         if name.startswith("kali_"):
-            continue  # security tools have their own scoped flow
+            continue
         tier = entry["tier"]
-        if tier == AUTO:
-            auto_lines.append(f"  {name} — {entry['desc']}")
-            allowed.add(name)
-        elif allow_destructive:
-            other_lines.append(f"  {name} [{tier}] — {entry['desc']}")
-            allowed.add(name)
+        if tier != AUTO and not allow_destructive:
+            continue
+        score = _score_action(task_tokens, name, entry["desc"])
+        if name in _CORE_ACTIONS:
+            score += 1  # gentle bias so basics are always available
+        candidates.append((score, name, entry["desc"], tier))
 
-    lines.append("READ-ONLY actions (safe, run freely):")
+    # Rank by relevance; keep top N, but always keep core read-only actions.
+    candidates.sort(key=lambda c: -c[0])
+    chosen: dict[str, tuple] = {}
+    for score, name, desc, tier in candidates:
+        if len(chosen) >= _MAX_CATALOG:
+            break
+        chosen[name] = (name, desc, tier)
+    for core in _CORE_ACTIONS:
+        if core in ACTIONS and core not in chosen:
+            chosen[core] = (core, ACTIONS[core]["desc"], ACTIONS[core]["tier"])
+
+    auto_lines, other_lines, allowed = [], [], set()
+    for name, desc, tier in chosen.values():
+        allowed.add(name)
+        if tier == AUTO:
+            auto_lines.append(f"  {name} — {desc}")
+        else:
+            other_lines.append(f"  {name} [{tier}] — {desc}")
+
+    lines = ["READ-ONLY actions (safe, run freely):"]
     lines.extend(sorted(auto_lines))
     if other_lines:
         lines.append("\nSTATE-CHANGING actions (need approval unless pre-approved):")
@@ -93,32 +143,39 @@ def _tool_catalog(allow_destructive: bool) -> tuple[str, set[str]]:
 
 # ── Planner (structured output) ───────────────────────────────────────────────
 
-def _plan_step(messages: list[dict]) -> dict:
-    """Ask the model for the next step as structured JSON. Robust to crashes."""
+def _call_model(model: str, messages: list[dict]) -> dict:
+    """One structured-output call. Raises on transport/model error."""
     import ollama
-
+    client = ollama.Client(host=OLLAMA_HOST)
+    resp = client.chat(
+        model=model,
+        messages=messages,
+        format=_STEP_SCHEMA,
+        options={"temperature": 0, "num_ctx": 2048, "num_predict": 400},
+    )
+    raw = resp["message"]["content"]
     try:
-        client = ollama.Client(host=OLLAMA_HOST)
-        resp = client.chat(
-            model=PLAN_MODEL,
-            messages=messages,
-            format=_STEP_SCHEMA,
-            options={"temperature": 0, "num_ctx": 2048, "num_predict": 400},
-        )
-        raw = resp["message"]["content"]
         return json.loads(raw)
     except json.JSONDecodeError:
-        # Salvage a JSON object from noisy output
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         if m:
-            try:
-                return json.loads(m.group())
-            except Exception:
-                pass
-        return {"thought": "parse failed", "done": True, "answer": ""}
+            return json.loads(m.group())
+        raise
+
+
+def _plan_step(messages: list[dict]) -> dict:
+    """Next step as structured JSON. Tries 7b (accurate); on crash/parse-fail
+    falls back to 3b (stable). Never raises."""
+    try:
+        return _call_model(PLAN_MODEL, messages)
     except Exception as exc:
-        log.warning("plan step failed: %s", exc)
-        return {"thought": f"planner error: {exc}", "done": True, "answer": ""}
+        log.warning("planner %s failed (%s) — falling back to %s",
+                    PLAN_MODEL, str(exc)[:60], FALLBACK_MODEL)
+        try:
+            return _call_model(FALLBACK_MODEL, messages)
+        except Exception as exc2:
+            log.warning("fallback planner failed: %s", str(exc2)[:60])
+            return {"thought": f"planner error: {exc2}", "done": True, "answer": ""}
 
 
 # ── Action execution with autonomy gate ───────────────────────────────────────
@@ -194,7 +251,7 @@ def run_agent(task: str, max_steps: int = 6, allow_destructive: bool = False) ->
         }
     """
     t0 = time.time()
-    catalog, allowed = _tool_catalog(allow_destructive)
+    catalog, allowed = _tool_catalog(allow_destructive, task=task)
     system = _SYSTEM_TEMPLATE.format(catalog=catalog)
 
     messages = [
@@ -312,12 +369,13 @@ def _log_run(task: str, steps: list, answer: str, needs_approval: str | None) ->
 def _test():
     print("=== Jarvis Agent self-test ===\n")
 
-    print("Test 1: Tool catalog builds...")
-    cat, allowed = _tool_catalog(allow_destructive=False)
+    print("Test 1: Tool catalog builds + relevance-filters...")
+    cat, allowed = _tool_catalog(allow_destructive=False, task="check disk usage")
     assert "disk" in allowed and "reboot" not in allowed
-    cat2, allowed2 = _tool_catalog(allow_destructive=True)
-    assert "restart_gateway" in allowed2
-    print(f"  ✓ Safe catalog: {len(allowed)} actions | Full catalog: {len(allowed2)} actions\n")
+    assert len(allowed) <= _MAX_CATALOG + len(_CORE_ACTIONS)
+    cat2, allowed2 = _tool_catalog(allow_destructive=True, task="restart the payment gateway backend")
+    assert "restart_gateway" in allowed2, f"relevant action filtered out: {allowed2}"
+    print(f"  ✓ Filtered safe: {len(allowed)} | Filtered destructive: {len(allowed2)} (restart_gateway present)\n")
 
     print("Test 2: Read-only task (autonomous, no approval)...")
     result = run_agent("What is the current disk and memory usage on this machine?", max_steps=4)
