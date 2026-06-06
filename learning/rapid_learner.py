@@ -263,6 +263,20 @@ def _store_correction(interaction: dict, correction: str) -> dict:
     except Exception as e:
         log.warning("ChromaDB correction store deferred to learner: %s", e)
 
+    # Extract and store rule in skillset immediately (non-blocking thread)
+    try:
+        from skillset import extract_and_store_rule_from_correction  # noqa: PLC0415
+        import threading  # noqa: PLC0415
+        query = interaction.get("query", "")
+        threading.Thread(
+            target=extract_and_store_rule_from_correction,
+            args=(query, correction),
+            daemon=True,
+        ).start()
+        log.debug(f"Rule extraction queued for: {query[:60]}")
+    except Exception as e:
+        log.debug(f"Skillset rule extraction unavailable: {e}")
+
     return {"status": "correction_stored", "id": interaction.get("id")}
 
 
