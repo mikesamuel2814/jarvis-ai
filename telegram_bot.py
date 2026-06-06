@@ -1343,6 +1343,12 @@ def main():
              B("♻️ Reboot",           callback_data="act_reboot"),
              B("⬆️ Update System",    callback_data="act_update_system"),
              B("❓ Help",             callback_data="cmd_actions")],
+            # ── 🧪 SELF-TEST ──────────────────────────────────────────────────
+            [B("🔬 Probe AI",         callback_data="cmd_probe"),
+             B("📊 Skills",           callback_data="cmd_skills"),
+             B("🧠 Recall",           callback_data="cmd_recall"),
+             B("🎯 Objectives",       callback_data="cmd_objectives"),
+             B("⏱ Benchmark",        callback_data="cmd_benchmark")],
         ])
 
     def _feedback_keyboard(iid: str) -> "InlineKeyboardMarkup":
@@ -2081,6 +2087,11 @@ def main():
     app_bot.add_handler(CommandHandler("openclaw", oc_cmd))
     app_bot.add_handler(CommandHandler("kali", kali_cmd))
     app_bot.add_handler(CommandHandler("scans", scans_cmd))
+    app_bot.add_handler(CommandHandler("probe",      probe_cmd))
+    app_bot.add_handler(CommandHandler("skills",     skills_cmd))
+    app_bot.add_handler(CommandHandler("recall",     recall_cmd))
+    app_bot.add_handler(CommandHandler("objectives", objectives_cmd))
+    app_bot.add_handler(CommandHandler("benchmark",  benchmark_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -2110,8 +2121,13 @@ def main():
         BotCommand("voice",     "Toggle voice audio responses"),
         BotCommand("new",       "Fresh session — clear history, ready for new instructions"),
         BotCommand("clear",     "Clear chat history"),
-        BotCommand("approve",   "Approve a pending action by ID"),
-        BotCommand("deny",      "Deny a pending action by ID"),
+        BotCommand("approve",    "Approve a pending action by ID"),
+        BotCommand("deny",       "Deny a pending action by ID"),
+        BotCommand("probe",      "Test local AI with a question"),
+        BotCommand("skills",     "Show Jarvis skills and memory stats"),
+        BotCommand("recall",     "What Jarvis remembers about you"),
+        BotCommand("objectives", "Jarvis main goals and your profile"),
+        BotCommand("benchmark",  "Benchmark all 3 local AI models"),
     ]
 
     async def _post_init(application):
