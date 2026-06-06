@@ -6,16 +6,24 @@ Semantic search over tools using ChromaDB embeddings.
 import os
 import json
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 
-import chromadb
+try:
+    import chromadb
+    _CHROMA_AVAILABLE = True
+except Exception as _chroma_exc:
+    chromadb = None  # type: ignore
+    _CHROMA_AVAILABLE = False
 
 from .decorator import get_all_metadata, get_tool_func, get_tool_metadata
 from .result import ToolResult
 
 JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", "/home/kali/.jarvis"))
 log = logging.getLogger("jarvis.tools.registry")
+if not _CHROMA_AVAILABLE:
+    log.warning("ChromaDB unavailable; ToolRegistry running in keyword-only mode.")
 
 
 class ToolRegistry:
@@ -26,11 +34,13 @@ class ToolRegistry:
 
     def __init__(self, chroma_path: Optional[Path] = None):
         self.chroma_path = chroma_path or (JARVIS_HOME / "memory")
-        self._client: Optional[chromadb.PersistentClient] = None
+        self._client: Optional["chromadb.PersistentClient"] = None
         self._collection = None
         self._tools: Dict[str, dict] = {}
 
     def _ensure_chroma(self):
+        if not _CHROMA_AVAILABLE:
+            return
         if self._client is None:
             self._client = chromadb.PersistentClient(path=str(self.chroma_path))
             self._collection = self._client.get_or_create_collection("jarvis_tools_v3")
@@ -38,6 +48,9 @@ class ToolRegistry:
     def index_all(self):
         """Index all currently registered tools into ChromaDB."""
         self._ensure_chroma()
+        if not _CHROMA_AVAILABLE or self._collection is None:
+            log.debug("ChromaDB not available; skipping semantic index.")
+            return
         all_meta = get_all_metadata()
         if not all_meta:
             log.warning("No tools registered yet.")
@@ -67,24 +80,25 @@ class ToolRegistry:
     def find_tools(self, query: str, n: int = 10, category: Optional[str] = None) -> List[dict]:
         """Semantic search for tools matching a natural language query."""
         self._ensure_chroma()
-        try:
-            results = self._collection.query(
-                query_texts=[query],
-                n_results=n,
-                where={"category": category} if category else None,
-                include=["metadatas", "distances"],
-            )
-            tools = []
-            for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
-                full = get_tool_metadata(meta["name"])
-                if full:
-                    full["distance"] = dist
-                    tools.append(full)
-            return tools
-        except Exception as exc:
-            log.warning("Semantic search failed: %s", exc)
-            # Fallback: keyword search
-            return self._keyword_search(query, n, category)
+        if _CHROMA_AVAILABLE and self._collection is not None:
+            try:
+                results = self._collection.query(
+                    query_texts=[query],
+                    n_results=n,
+                    where={"category": category} if category else None,
+                    include=["metadatas", "distances"],
+                )
+                tools = []
+                for meta, dist in zip(results["metadatas"][0], results["distances"][0]):
+                    full = get_tool_metadata(meta["name"])
+                    if full:
+                        full["distance"] = dist
+                        tools.append(full)
+                return tools
+            except Exception as exc:
+                log.warning("Semantic search failed: %s", exc)
+        # Fallback: keyword search
+        return self._keyword_search(query, n, category)
 
     def _keyword_search(self, query: str, n: int, category: Optional[str] = None) -> List[dict]:
         q = query.lower()
@@ -114,7 +128,6 @@ class ToolRegistry:
         if func is None:
             return ToolResult.fail(f"Tool '{name}' not found.", tool_name=name)
         meta = get_tool_metadata(name)
-        import time
         t0 = time.time()
         try:
             result = func(**kwargs)
