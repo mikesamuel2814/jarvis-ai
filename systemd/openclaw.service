@@ -14,7 +14,7 @@ WorkingDirectory=/home/kali
 EnvironmentFile=-/home/kali/.jarvis/config/secrets.env
 
 # Start OpenClaw gateway
-ExecStart=/usr/local/bin/openclaw gateway
+ExecStart=/usr/bin/node /home/kali/.npm-global/lib/node_modules/openclaw/openclaw.mjs gateway
 ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=always
