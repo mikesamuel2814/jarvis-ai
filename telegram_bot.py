@@ -211,6 +211,20 @@ def _is_casual(text: str) -> bool:
 
 _last_interaction: dict[int, str] = {}  # uid → interaction_id
 _voice_mode: dict[int, bool] = {}       # uid → voice on/off
+_pending_action: dict[int, str] = {}    # uid → action name awaiting ForceReply arg
+
+# Actions that need a parameter argument before executing
+_NEEDS_ARG = {
+    "shell", "ssh_cmd", "file_read", "file_list", "file_write",
+    "kali_dig", "kali_host", "kali_nslookup", "kali_whois",
+    "kali_nmap_ping", "kali_nmap_quick", "kali_nmap_full",
+    "kali_nmap_service", "kali_nmap_vuln", "kali_masscan",
+    "kali_enum4linux", "kali_smb_list", "kali_whatweb",
+    "kali_nikto", "kali_gobuster_dir", "kali_ffuf",
+    "kali_wpscan", "kali_nuclei", "kali_sqlmap",
+    "kali_hydra", "kali_john", "kali_hashcat",
+    "kali_theharvester", "kali_searchsploit", "kali_msf_resource",
+}
 
 VOICE_PREFS_FILE = JARVIS_HOME / "data" / "voice_prefs.json"
 
@@ -551,6 +565,7 @@ HELP_TEXT = (
     "━━━ <b>⚙️ Settings</b> ━━━\n"
     "/remember <i>key value</i> — Save a personal fact\n"
     "/voice on|off — Toggle voice audio responses\n"
+    "/new — Fresh session (clear history + ready for new instructions)\n"
     "/clear — Clear chat history\n"
     "/help — Show this message\n\n"
     "<i>💡 Tip: Tap 👍 or 👎 after any reply to train Jarvis.</i>\n"
@@ -924,6 +939,19 @@ def main():
         _save_histories()
         await send(update, "Conversation history cleared.")
 
+    async def new_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from fmt import bold
+        uid = update.effective_user.id
+        _histories[uid] = deque(maxlen=MAX_HISTORY)
+        _save_histories()
+        _last_interaction.pop(uid, None)
+        await send(update,
+            f"🔄 {bold('Fresh start, Sir.')}\n\n"
+            f"Chat history cleared. I'm ready for new instructions.\n"
+            f"Use /help to see what I can do.",
+            already_html=True
+        )
+
     async def remember_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Save an explicit fact: /remember key value  or  /remember value (saves as preference)"""
         text = " ".join(context.args).strip() if context.args else ""
@@ -953,7 +981,27 @@ def main():
                 lines.append(bold(f"{icon} {label}"))
                 lines.extend(items)
                 lines.append("")
-        await send(update, "\n".join(lines), already_html=True)
+        text = "\n".join(lines)
+        B = InlineKeyboardButton
+        quick_keyboard = InlineKeyboardMarkup([
+            [B("⚡ Processes", callback_data="act_ps"),
+             B("💾 Disk",      callback_data="act_disk"),
+             B("🧠 Memory",    callback_data="act_memory"),
+             B("⏱ Uptime",    callback_data="act_uptime")],
+            [B("🎮 GPU",       callback_data="act_gpu"),
+             B("🔧 Services",  callback_data="act_services"),
+             B("🌐 Ports",     callback_data="act_ports"),
+             B("📡 Network",   callback_data="act_network")],
+            [B("📈 Top CPU",   callback_data="act_top5_cpu"),
+             B("📊 Top RAM",   callback_data="act_top5_mem"),
+             B("🤖 AI Models", callback_data="act_ollama_models"),
+             B("🔒 Tailscale", callback_data="act_tailscale")],
+            [B("🚀 PM2",       callback_data="act_pm2_status"),
+             B("📦 Git Status",callback_data="act_git_status_all"),
+             B("📁 Projects",  callback_data="act_project_status"),
+             B("🌍 Nginx",     callback_data="act_nginx_status")],
+        ])
+        await send(update, text, already_html=True, reply_markup=quick_keyboard)
 
     async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from permissions import list_pending
@@ -1121,7 +1169,42 @@ def main():
                 await query.message.reply_text(plain or "Done.")
 
         elif data.startswith("act_"):
+            from executor import ACTIONS, AUTO, CONFIRM, APPROVE
+            from fmt import esc
             action = data[4:]
+            entry = ACTIONS.get(action, {})
+            tier = entry.get("tier", AUTO)
+            desc = entry.get("desc", action)
+
+            # Actions needing a parameter: send ForceReply prompt
+            if action in _NEEDS_ARG:
+                from telegram import ForceReply
+                await query.message.reply_text(
+                    f"⚙️ <b>{esc(desc)}</b>\n\nSir, please provide the argument for <code>{esc(action)}</code>:\n"
+                    f"<i>Examples vary — e.g. for shell: <code>ls -la ~/.jarvis</code></i>",
+                    parse_mode="HTML",
+                    reply_markup=ForceReply(selective=True, input_field_placeholder=f"Argument for {action}…"),
+                )
+                _pending_action[query.from_user.id] = action
+                await query.answer()
+                return
+
+            # CONFIRM/APPROVE tier: show inline confirmation keyboard
+            if tier in (CONFIRM, APPROVE):
+                tier_icon = "🔔" if tier == CONFIRM else "🔐"
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(f"✅ Yes, {desc[:30]}", callback_data=f"confirm_act_{action}"),
+                    InlineKeyboardButton("❌ Cancel", callback_data="cancel_act"),
+                ]])
+                await query.message.reply_text(
+                    f"{tier_icon} <b>{esc(desc)}</b>\n\nSir, confirm this action?",
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+                await query.answer()
+                return
+
+            # AUTO tier: execute immediately
             await query.message.chat.send_action("typing")
             result = run_action_via_api(action)
             # run_action_via_api returns Markdown-style text (from _format_action_output)
@@ -1133,6 +1216,24 @@ def main():
                 # Fallback to plain text if HTML rendering fails
                 plain = re.sub(r"<[^>]+>", "", result_html)
                 await query.message.reply_text(plain or "Done.")
+            await query.answer()
+
+        elif data.startswith("confirm_act_"):
+            action = data[len("confirm_act_"):]
+            await query.message.chat.send_action("typing")
+            result = run_action_via_api(action)
+            result_html = _to_html(result)
+            try:
+                for part in split_message(result_html):
+                    await query.message.reply_text(part, parse_mode="HTML")
+            except Exception:
+                plain = re.sub(r"<[^>]+>", "", result_html)
+                await query.message.reply_text(plain or "Done.")
+            await query.answer()
+
+        elif data == "cancel_act":
+            await query.edit_message_text("❌ Cancelled.", parse_mode="HTML")
+            await query.answer()
 
     def _build_reference_keyboard() -> "InlineKeyboardMarkup":
         B = InlineKeyboardButton
@@ -1643,6 +1744,21 @@ def main():
             return
         _cache_chat_id(uid)
 
+        # Check if this message is a ForceReply response to a pending action
+        if uid in _pending_action and update.message.reply_to_message:
+            action = _pending_action.pop(uid)
+            arg = text.strip()
+            await update.message.chat.send_action("typing")
+            result = run_action_via_api(action, arg=arg)
+            result_html = _to_html(result)
+            try:
+                for part in split_message(result_html):
+                    await update.message.reply_text(part, parse_mode="HTML")
+            except Exception:
+                plain = re.sub(r"<[^>]+>", "", result_html)
+                await update.message.reply_text(plain or "Done.")
+            return
+
         # Check if it's an action command first (fast path, no LLM needed)
         from executor import detect_action, ACTIONS, AUTO, CONFIRM, APPROVE
         action = detect_action(text)
@@ -1652,7 +1768,19 @@ def main():
             if tier == AUTO:
                 await update.message.chat.send_action("typing")
                 result_text = run_action_via_api(action)
-                await send(update, result_text)
+                if "Approval required" in result_text:
+                    m = re.search(r'ID: `([A-F0-9]{8})`', result_text)
+                    if m:
+                        rid = m.group(1)
+                        keyboard = InlineKeyboardMarkup([[
+                            InlineKeyboardButton("✅ Approve & Run", callback_data=f"approve_{rid}"),
+                            InlineKeyboardButton("❌ Deny",          callback_data=f"deny_{rid}"),
+                        ]])
+                        await send(update, _to_html(result_text), already_html=True, reply_markup=keyboard)
+                    else:
+                        await send(update, result_text)
+                else:
+                    await send(update, result_text)
                 return
             elif tier in (CONFIRM, APPROVE):
                 from fmt import bold, esc
@@ -1784,6 +1912,7 @@ def main():
     app_bot.add_handler(CommandHandler("systeminfo", sysinfo_cmd))
     app_bot.add_handler(CommandHandler("index", index_cmd))
     app_bot.add_handler(CommandHandler("clear", clear_cmd))
+    app_bot.add_handler(CommandHandler("new", new_cmd))
     app_bot.add_handler(CommandHandler("remember", remember_cmd))
     app_bot.add_handler(CommandHandler("voice", voice_cmd))
     app_bot.add_handler(CommandHandler("correct", correct_cmd))
@@ -1830,6 +1959,7 @@ def main():
         BotCommand("index",     "Re-index your work"),
         BotCommand("remember",  "Save a personal fact"),
         BotCommand("voice",     "Toggle voice audio responses"),
+        BotCommand("new",       "Fresh session — clear history, ready for new instructions"),
         BotCommand("clear",     "Clear chat history"),
     ]
 
