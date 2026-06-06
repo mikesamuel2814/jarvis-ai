@@ -35,6 +35,7 @@ ROUTING_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 class BrainTier(Enum):
     EDGE   = "edge"    # Local Ollama — zero cost, zero latency
+    CURSOR = "cursor"  # Cursor AI tier — code-aware, live project context
     HYBRID = "hybrid"  # Local pre-analysis + Claude reasoning
     CLOUD  = "cloud"   # Claude Sonnet — deep reasoning (swap to Kimi when key available)
 
@@ -106,6 +107,9 @@ def route(
     for pfx in e_rules.get("prefixes", ["!local", "!edge", "!fast"]):
         if ql.startswith(pfx):
             return BrainTier.EDGE
+    for pfx in ["!cursor", "!code"]:
+        if ql.startswith(pfx):
+            return BrainTier.CURSOR
     for pfx in c_rules.get("prefixes", ["!cloud", "!kimi", "!claude", "!deep"]):
         if ql.startswith(pfx):
             return BrainTier.CLOUD
@@ -151,13 +155,18 @@ def route(
     if _word_match(query, cloud_patterns):
         return BrainTier.CLOUD
 
-    # ── 6. Code query length split ────────────────────────────
-    code_kws = ["class", "function", "bug", "error", "fix", "code"]
+    # ── 6. Code queries → Cursor tier ────────────────────────
+    code_kws = [
+        "class", "function", "bug", "error", "fix", "code", "refactor",
+        "import", "module", "component", "api", "endpoint", "database",
+        "deploy", "build", "test", "lint", "typescript", "react", "node",
+        "python", "fastapi", "pm2", "nginx", "webpack", "vite",
+    ]
     if any(kw in ql for kw in code_kws):
         char_limit = e_rules.get("code_char_limit", 200)
         if len(query) < char_limit and "?" in query:
-            return BrainTier.EDGE
-        return BrainTier.HYBRID
+            return BrainTier.EDGE  # trivial code question → local
+        return BrainTier.CURSOR
 
     # ── 7. Default ─────────────────────────────────────────────
     return BrainTier.HYBRID
@@ -276,6 +285,16 @@ def query_cloud(
     return content
 
 
+def query_cursor(query: str, rag_context: str, history: list[dict] | None = None) -> str:
+    """Cursor AI tier — code-aware queries with live project context."""
+    from cursor.query import query as cursor_query
+    t0 = time.time()
+    content = cursor_query(query, rag_context=rag_context, history=history)
+    latency = (time.time() - t0) * 1000
+    log_routing_decision(query, BrainTier.CURSOR, "cursor+claude", latency)
+    return content
+
+
 def query_hybrid(query: str, rag_context: str, history: list[dict] | None = None) -> str:
     """
     Hybrid: local Ollama pre-analysis → Kimi deep reasoning.
@@ -332,6 +351,9 @@ def execute(
         if tier == BrainTier.EDGE:
             response = query_edge(query, rag_context, history=history)
             model    = "ollama-local"
+        elif tier == BrainTier.CURSOR:
+            response = query_cursor(query, rag_context, history=history)
+            model    = "cursor+claude"
         elif tier == BrainTier.CLOUD:
             response = query_cloud(query, rag_context, history=history)
             model    = "claude-sonnet-4-6"

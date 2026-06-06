@@ -33,7 +33,7 @@ def process_session_file(path: Path) -> dict | None:
     if not session or len(json.dumps(session)) < MIN_SESSION_CHARS:
         return None
 
-    enriched = _enrich_with_kimi(session)
+    enriched = _enrich_with_ai(session)
     _store_in_chromadb(enriched, str(path))
 
     if _is_architectural(session):
@@ -68,10 +68,12 @@ def _parse_session(path: Path) -> dict:
         return {"type": "log", "content": text[:5000], "file": path.name}
 
 
-def _enrich_with_kimi(session: dict) -> dict:
-    """Use Kimi K2.6 to extract structured insights from Cursor session."""
+def _enrich_with_ai(session: dict) -> dict:
+    """Extract structured insights from a Cursor session using Claude CLI."""
     try:
-        from kimi.client import get_client, _check_privacy
+        import sys
+        sys.path.insert(0, str(JARVIS_HOME))
+        from claude_client import get_client, _check_privacy
 
         session_text = json.dumps(session)[:8000]
         _check_privacy(session_text)
@@ -95,21 +97,21 @@ Return JSON: {{"goal": "", "patterns": [], "issues": [], "decisions": [], "proje
             prompt,
             system="You are a code analysis assistant. Return valid JSON only.",
         )
-        session["kimi_analysis"] = result
+        session["analysis"] = result
         session["enriched_ts"] = int(time.time())
     except ValueError as e:
         log.warning("Privacy check blocked Cursor session enrichment: %s", e)
-        session["kimi_analysis"] = {"blocked": "privacy_boundary"}
+        session["analysis"] = {"blocked": "privacy_boundary"}
     except Exception as e:
-        log.error("Kimi enrichment failed: %s", e)
-        session["kimi_analysis"] = {"error": str(e)[:200]}
+        log.error("AI enrichment failed: %s", e)
+        session["analysis"] = {"error": str(e)[:200]}
 
     return session
 
 
 def _is_architectural(session: dict) -> bool:
     """Detect if a session contains significant architectural decisions."""
-    analysis = session.get("kimi_analysis", {})
+    analysis = session.get("analysis", {})
     decisions = analysis.get("decisions", [])
     return len(decisions) > 0
 
@@ -119,7 +121,7 @@ def _store_in_chromadb(enriched: dict, source_path: str) -> None:
     try:
         import chromadb
 
-        analysis = enriched.get("kimi_analysis", {})
+        analysis = enriched.get("analysis", {})
         doc = (
             f"Cursor session [{enriched.get('file', '')}]: "
             f"Goal: {analysis.get('goal', '')}. "
@@ -148,7 +150,7 @@ def _store_in_chromadb(enriched: dict, source_path: str) -> None:
 
 def _send_telegram_alert(enriched: dict) -> None:
     """Alert Mike about a significant architectural decision via Telegram."""
-    analysis  = enriched.get("kimi_analysis", {})
+    analysis  = enriched.get("analysis", {})
     decisions = analysis.get("decisions", [])
     if not decisions:
         return
