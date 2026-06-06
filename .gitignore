@@ -7,7 +7,8 @@ venv/
 
 # Jarvis runtime data — never commit
 data/
-memory/
+memory/*.sqlite3
+memory/*/
 logs/
 models/
 training/
