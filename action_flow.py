@@ -150,61 +150,80 @@ def orchestrate(
         }
 
     # ── 3. Execute the planned steps in order ──────────────────────────────────
+    # AUTO steps run immediately. CONFIRM/APPROVE steps are bundled into ONE
+    # task-level approval request — Sir approves the whole flow once.
+    from permissions import create_task_request
+
     results: list[dict] = []
     step_lines: list[str] = []
     pending_descs: list[str] = []
     multistep = len(planned) > 1
 
-    for i, spec in enumerate(planned, start=1):
+    # Split AUTO steps (run now) from gated steps (bundle into one approval).
+    auto_steps = []
+    gated_steps = []
+    for spec in planned:
+        action_name = spec.get("action", "")
+        entry = ACTIONS[action_name]
+        tier = entry["tier"]
+        if tier == AUTO:
+            auto_steps.append(spec)
+        else:
+            gated_steps.append(spec)
+
+    # Run AUTO steps first.
+    for i, spec in enumerate(auto_steps, start=1):
         action_name = spec.get("action", "")
         entry = ACTIONS[action_name]
         arg = spec.get("arg", "") or ""
-        tier = entry["tier"]
-
-        # CONFIRM/APPROVE never auto-run — raise an approval request instead.
-        if tier != AUTO:
-            try:
-                perm_req = create_request(
-                    action=action_name,
-                    description=entry["desc"],
-                    tier=tier,
-                    arg=arg,
-                )
-                rid = perm_req["id"]
-            except Exception as e:  # noqa: BLE001
-                log.error("create_request failed for %s: %s", action_name, e)
-                step_lines.append(f"step {i} ({entry['desc']}) … ✗ could not queue approval")
-                continue
-            pending_descs.append(entry["desc"])
-            step_lines.append(
-                f"step {i} ({entry['desc']}) … ⏳ approval required "
-                f"(ID {rid}: /approve {rid} or /deny {rid})"
-            )
-            if notify:
-                try:
-                    notify(
-                        f"⚡ Jarvis planned action — ID: `{rid}`\n"
-                        f"**{entry['desc']}**"
-                        + (f"\nArg: `{arg}`" if arg else "")
-                        + f"\n\nReply `/approve {rid}` or `/deny {rid}`"
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
-            continue
-
-        # AUTO action: OpenClaw-first → executor.
         result = run_action_step(action_name, arg)
         results.append(result)
         icon = "✓" if result.get("success") else "✗"
         via = result.get("via", "executor")
         step_lines.append(f"step {i} ({entry['desc']}) … {icon} [{via}]")
-
-        # Stop a multi-step plan on the first hard failure — don't plow ahead.
         if multistep and not result.get("success"):
             step_lines.append(
                 f"Halted after step {i}: {result.get('output', 'unknown error')[:300]}"
             )
             break
+
+    # Bundle all gated steps into ONE task-level approval (not one per step).
+    if gated_steps:
+        offset = len(auto_steps) + 1
+        task_steps = []
+        for j, spec in enumerate(gated_steps, start=offset):
+            action_name = spec.get("action", "")
+            entry = ACTIONS[action_name]
+            arg = spec.get("arg", "") or ""
+            task_steps.append({"action": action_name, "arg": arg, "desc": entry["desc"]})
+            pending_descs.append(entry["desc"])
+            step_lines.append(f"step {j} ({entry['desc']}) … ⏳ awaiting task approval")
+
+        try:
+            task_req = create_task_request(
+                description=query[:200],
+                steps=task_steps,
+                summary=f"{len(task_steps)} action(s): " + "; ".join(d["desc"] for d in task_steps),
+            )
+            rid = task_req["id"]
+            step_lines.append(f"⏳ Task ID {rid} — approve with /approve {rid} or deny with /deny {rid}")
+            if notify:
+                try:
+                    steps_txt = "\n".join(
+                        f"  {k+1}. {s['desc']}" + (f" (`{s['arg']}`)" if s.get("arg") else "")
+                        for k, s in enumerate(task_steps)
+                    )
+                    notify(
+                        f"🔐 Task approval — ID: `{rid}`\n\n"
+                        f"**{query[:150]}**\n\n"
+                        f"Steps:\n{steps_txt}\n\n"
+                        f"Reply `/approve {rid}` to run all or `/deny {rid}` to cancel."
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as e:  # noqa: BLE001
+            log.error("create_task_request failed: %s", e)
+            step_lines.append(f"✗ Could not queue task approval: {e}")
 
     # ── 4. Synthesize a reply ──────────────────────────────────────────────────
     response = ""

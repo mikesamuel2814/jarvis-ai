@@ -120,11 +120,23 @@ def list_pending() -> list[dict]:
 
 
 def format_telegram_message(req: dict) -> str:
+    expires_in = int((datetime.fromisoformat(req["expires_at"]) - datetime.now()).total_seconds() / 60)
+    if req.get("kind") == "task":
+        steps = req.get("steps", [])
+        steps_txt = "\n".join(
+            f"  {i+1}. {s['desc']}" + (f" (`{s['arg']}`)" if s.get("arg") else "")
+            for i, s in enumerate(steps)
+        )
+        msg = f"🔐 Task approval — ID: `{req['id']}`\n\n"
+        msg += f"**{req['description'][:200]}**\n\n"
+        if steps_txt:
+            msg += f"Steps:\n{steps_txt}\n\n"
+        msg += f"Approve once → all steps run autonomously.\nExpires in {expires_in} min."
+        return msg
     tier_label = {"confirm": "⚡ Quick action", "approve": "🔐 High-risk action"}
     msg = f"{tier_label.get(req['tier'], '🔔 Action')} — ID: `{req['id']}`\n\n"
     msg += f"**{req['description']}**\n"
     if req.get("arg"):
         msg += f"Argument: `{req['arg']}`\n"
-    expires_in = int((datetime.fromisoformat(req["expires_at"]) - datetime.now()).total_seconds() / 60)
     msg += f"\nExpires in {expires_in} min. Tap to respond:"
     return msg
