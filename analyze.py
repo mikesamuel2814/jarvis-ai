@@ -203,7 +203,7 @@ def send_briefing(cfg: dict, text: str):
 
 if __name__ == "__main__":
     import sys
-    period = "weekly" if "--weekly" in sys.argv else "daily"
+    period = "weekly" if "--weekly" in sys.argv else "daily"  # --daily is default
     cfg = load_config()
     briefing = generate_briefing(period)
     print(briefing)

@@ -17,7 +17,7 @@ import requests
 import yaml
 
 JARVIS_HOME = Path.home() / ".jarvis"
-CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
+CONFIG_FILE = JARVIS_HOME / "config" / "jarvis_v2.yaml"
 LOG_FILE = JARVIS_HOME / "logs" / "monitor.log"
 STATE_FILE = JARVIS_HOME / "data" / "monitor_state.json"
 INTERACTIONS_FILE = JARVIS_HOME / "data" / "interactions.jsonl"
@@ -58,33 +58,16 @@ def save_state(state: dict):
 
 
 def send_telegram(msg: str, cfg: dict):
-    token_file = JARVIS_HOME / "config" / "telegram.json"
-    if not token_file.exists():
-        return
+    """Send directly via Telegram Bot API using stored chat_id — never calls getUpdates."""
     try:
+        token_file = JARVIS_HOME / "config" / "telegram.json"
+        chat_id_file = JARVIS_HOME / "data" / "telegram_chat_id.json"
+        if not token_file.exists() or not chat_id_file.exists():
+            return
         token = json.loads(token_file.read_text()).get("bot_token", "")
-        if not token or token == "YOUR_BOT_TOKEN_HERE":
+        chat_id = json.loads(chat_id_file.read_text()).get("chat_id", "")
+        if not token or not chat_id or token == "YOUR_BOT_TOKEN_HERE":
             return
-        # Try API endpoint first
-        api_port = cfg.get("interfaces", {}).get("api_port", 8181)
-        try:
-            requests.post(
-                f"http://localhost:{api_port}/telegram/send",
-                json={"text": msg},
-                timeout=10,
-            )
-            return
-        except Exception:
-            pass
-        # Fallback: get chat_id from recent updates and send directly
-        updates = requests.get(
-            f"https://api.telegram.org/bot{token}/getUpdates",
-            timeout=10,
-        ).json()
-        messages = updates.get("result", [])
-        if not messages:
-            return
-        chat_id = messages[-1]["message"]["chat"]["id"]
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
@@ -227,10 +210,13 @@ def check_services(state: dict, alerts: list):
     """Check critical systemd services are running."""
     services = ["ollama", "jarvis", "jarvis-telegram"]
     for svc in services:
-        r = subprocess.run(
-            ["systemctl", "is-active", svc],
-            capture_output=True, text=True,
-        )
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True, text=True, timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            continue
         is_active = r.stdout.strip() == "active"
         was_down = state.get(f"svc_down_{svc}", False)
         if not is_active and not was_down:

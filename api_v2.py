@@ -170,25 +170,13 @@ def _get_telegram_token() -> str:
 
 
 def _get_chat_id(token: str) -> int | None:
+    """Read chat_id from persisted file — never calls getUpdates (would conflict with bot polling)."""
     chat_id_file = JARVIS_HOME / "data" / "telegram_chat_id.json"
     if chat_id_file.exists():
         try:
             return json.loads(chat_id_file.read_text()).get("chat_id")
         except Exception:
             pass
-    try:
-        import requests
-        updates = requests.get(
-            f"https://api.telegram.org/bot{token}/getUpdates", timeout=10
-        ).json()
-        msgs = updates.get("result", [])
-        if msgs:
-            cid = msgs[-1]["message"]["chat"]["id"]
-            chat_id_file.parent.mkdir(parents=True, exist_ok=True)
-            chat_id_file.write_text(json.dumps({"chat_id": cid}))
-            return cid
-    except Exception:
-        pass
     return None
 
 
@@ -283,6 +271,18 @@ async def health():
     if not API_KEY:
         status["warning"] = "JARVIS_API_KEY not configured"
     return status
+
+
+# ── Internal endpoints (no auth — localhost only, used by monitor/healer) ──────
+
+class TelegramMessage(BaseModel):
+    text: str
+
+@app.post("/telegram/send")
+async def telegram_send(msg: TelegramMessage):
+    """Internal-use send — no auth required since Jarvis binds to 127.0.0.1 only."""
+    ok = _send_telegram_direct(msg.text)
+    return {"ok": ok}
 
 
 # ── Authenticated endpoints ─────────────────────────────────────────

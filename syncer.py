@@ -142,8 +142,26 @@ def _llm_commit_message(files: list[str]) -> str | None:
     return None
 
 
+_SYNC_LOCK = JARVIS_HOME / "data" / ".syncer.lock"
+
+
 def sync():
     """Stage, commit, and push all changes to both remotes."""
+    # Lock file prevents concurrent runs between daemon debounce and cron --once
+    if _SYNC_LOCK.exists():
+        try:
+            age = time.time() - _SYNC_LOCK.stat().st_mtime
+            if age < 120:
+                log.info("Another sync in progress — skipping.")
+                return
+            _SYNC_LOCK.unlink()  # Stale lock
+        except Exception:
+            pass
+    try:
+        _SYNC_LOCK.touch()
+    except Exception:
+        pass
+
     log.info("Sync triggered — checking for changes...")
 
     _git(["add", "--all"])
@@ -173,6 +191,11 @@ def sync():
             log.info(f"Pushed to {remote}")
         else:
             log.error(f"Push to {remote} failed: {out}")
+
+    try:
+        _SYNC_LOCK.unlink()
+    except Exception:
+        pass
 
 
 class ChangeHandler(FileSystemEventHandler):

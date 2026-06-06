@@ -87,8 +87,14 @@ def send_telegram(text: str):
 
 
 def check_service(svc: str) -> bool:
-    r = subprocess.run(["systemctl", "is-active", svc], capture_output=True, text=True)
-    return r.stdout.strip() == "active"
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", svc],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() == "active"
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def restart_service(svc: str) -> tuple[bool, str]:

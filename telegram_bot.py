@@ -1436,7 +1436,10 @@ def main():
     app_bot.add_error_handler(error_handler)
 
     log.info(f"Jarvis Telegram bot starting (API: {API_BASE})")
-    app_bot.run_polling(allowed_updates=["message", "callback_query"])
+    app_bot.run_polling(
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
