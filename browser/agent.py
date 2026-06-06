@@ -19,11 +19,17 @@ Public API:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
 from io import BytesIO
 from typing import Any
+
+# Kali-specific segfault mitigation for anything spawning subprocesses near
+# Chrome (chromedriver / renderer / zygote). Set at import time so it is
+# inherited by every child process this module launches.
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 
 log = logging.getLogger("jarvis.browser")
 
@@ -32,16 +38,53 @@ _CHROMEDRIVER    = "/usr/bin/chromedriver"
 _PAGE_TIMEOUT    = 20_000   # ms
 _IMPLICIT_WAIT   = 8        # seconds
 
+# Substrings that indicate the renderer/tab died and the driver is unusable.
+_CRASH_MARKERS = (
+    "tab crashed",
+    "renderer",
+    "session deleted",
+    "disconnected",
+    "no such window",
+    "chrome not reachable",
+    "invalid session id",
+    "web view not found",
+    "target window already closed",
+)
+
 _CHROME_ARGS = [
     "--headless=new",
     "--no-sandbox",
+    "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
+    "--disable-software-rasterizer",
     "--disable-blink-features=AutomationControlled",
     "--window-size=1280,900",
+    # ── Renderer/tab-crash hardening for heavy SPA pages ──────────────────
+    "--no-zygote",                       # avoid zygote fork crashes (Kali)
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-background-timer-throttling",
+    "--disable-ipc-flooding-protection",
+    "--disable-features=Translate,TranslateUI,site-per-process,"
+    "IsolateOrigins,BackForwardCache,OptimizationHints",
+    "--mute-audio",
+    "--disable-2d-canvas-clip-aa",
+    "--disable-hang-monitor",
+    "--disable-client-side-phishing-detection",
+    "--disable-component-update",
+    "--blink-settings=imagesEnabled=false",   # block images → huge renderer mem cut
     "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 ]
+
+
+def _is_crash(exc: Exception) -> bool:
+    """True if the exception indicates a dead renderer/tab/session."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CRASH_MARKERS)
 
 
 # ── Driver factory ────────────────────────────────────────────────────────
@@ -53,21 +96,36 @@ def _make_driver():
 
     opts = Options()
     opts.binary_location = _CHROME_BIN
+    # Don't block on full SPA load — return as soon as DOM is interactive.
+    opts.page_load_strategy = "eager"
     for arg in _CHROME_ARGS:
         opts.add_argument(arg)
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
+    # Belt-and-suspenders image blocking via content settings prefs.
+    opts.add_experimental_option(
+        "prefs",
+        {
+            "profile.managed_default_content_settings.images": 2,
+            "profile.default_content_setting_values.notifications": 2,
+        },
+    )
 
-    svc = Service(_CHROMEDRIVER, log_output="/dev/null")
+    svc_env = dict(os.environ)
+    svc_env["MALLOC_ARENA_MAX"] = "2"
+    svc = Service(_CHROMEDRIVER, log_output="/dev/null", env=svc_env)
     driver = webdriver.Chrome(service=svc, options=opts)
     driver.set_page_load_timeout(_PAGE_TIMEOUT / 1000)
     driver.implicitly_wait(_IMPLICIT_WAIT)
 
     # Mask webdriver fingerprint
-    driver.execute_cdp_cmd(
-        "Page.addScriptToEvaluateOnNewDocument",
-        {"source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"},
-    )
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"},
+        )
+    except Exception:
+        pass
     return driver
 
 
@@ -90,63 +148,93 @@ class BrowserAgent:
         return cls._instance
 
     def _driver_ok(self) -> bool:
+        if self._driver is None:
+            return False
         try:
             _ = self._driver.current_url
             return True
         except Exception:
             return False
 
-    def _ensure_driver(self):
-        if self._driver is None or not self._driver_ok():
+    def _ensure_driver(self, force: bool = False):
+        """Ensure a live driver exists. force=True tears down any existing
+        (possibly crashed) driver and spawns a fresh one."""
+        if force or self._driver is None or not self._driver_ok():
             log.info("(Re)starting headless Chromium...")
             try:
                 if self._driver:
                     self._driver.quit()
             except Exception:
                 pass
+            self._driver = None
             self._driver = _make_driver()
             log.info("Chromium ready.")
 
     # ── Navigation ────────────────────────────────────────────────────
 
     def open_url(self, url: str, wait_for: str | None = None) -> str:
-        """Navigate to URL. Returns clean extracted text."""
+        """Navigate to URL. Returns clean extracted text.
+
+        Heavy SPA pages can crash the Chrome renderer ("tab crashed"). On such
+        a crash we recreate a fresh driver and retry exactly once.
+        """
         with self._driver_lock:
-            self._ensure_driver()
-            try:
-                self._driver.get(url)
-                if wait_for:
-                    from selenium.webdriver.common.by import By
-                    from selenium.webdriver.support import expected_conditions as EC
-                    from selenium.webdriver.support.ui import WebDriverWait
-                    WebDriverWait(self._driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, wait_for))
-                    )
-                time.sleep(1.5)  # let JS settle
-                return self._extract_text()
-            except Exception as exc:
-                log.warning("open_url(%s) failed: %s", url, exc)
-                return ""
+            for attempt in (1, 2):
+                self._ensure_driver(force=(attempt == 2))
+                try:
+                    self._driver.get(url)
+                    if wait_for:
+                        from selenium.webdriver.common.by import By
+                        from selenium.webdriver.support import expected_conditions as EC
+                        from selenium.webdriver.support.ui import WebDriverWait
+                        WebDriverWait(self._driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, wait_for))
+                        )
+                    time.sleep(1.5)  # let JS settle
+                    return self._extract_text()
+                except Exception as exc:
+                    if attempt == 1 and _is_crash(exc):
+                        log.warning(
+                            "open_url(%s) renderer crash (%s) — retrying with fresh driver",
+                            url, exc,
+                        )
+                        continue
+                    log.warning("open_url(%s) failed: %s", url, exc)
+                    return ""
+            return ""
 
     def _extract_text(self) -> str:
-        """Extract clean text from current page HTML via trafilatura."""
+        """Extract clean text from current page HTML via trafilatura.
+
+        Re-raises renderer-crash exceptions so callers (open_url) can retry on
+        a fresh driver instead of silently returning empty text.
+        """
+        html = ""
+        try:
+            html = self._driver.page_source
+        except Exception as exc:
+            if _is_crash(exc):
+                raise
         try:
             import trafilatura
-            html = self._driver.page_source
             text = trafilatura.extract(
                 html,
                 include_comments=False,
                 include_tables=True,
                 no_fallback=False,
             )
-            return (text or "")[:4000]
+            if text:
+                return text[:4000]
         except Exception:
-            # Fallback: strip tags from body text
-            try:
-                body = self._driver.find_element("tag name", "body").text
-                return body[:4000]
-            except Exception:
-                return ""
+            pass
+        # Fallback: strip tags from body text
+        try:
+            body = self._driver.find_element("tag name", "body").text
+            return body[:4000]
+        except Exception as exc:
+            if _is_crash(exc):
+                raise
+            return ""
 
     def current_url(self) -> str:
         with self._driver_lock:
