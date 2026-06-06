@@ -510,6 +510,15 @@ def run_learning():
             metadatas=[{"source_type": "session_summary", "date": datetime.now().isoformat()[:10]}],
         )
 
+    # Enrich any skill gaps using silent web search
+    try:
+        from web_search_trainer import enrich_skill_gaps
+        gaps_enriched = enrich_skill_gaps()
+        if gaps_enriched:
+            log(f"  [web] {gaps_enriched} skill gaps enriched via web search")
+    except Exception as _we:
+        log(f"  [web] skill gap enrichment skipped: {_we}")
+
     log(f"Learner: done. +{lessons_added} lessons, +{golden_added} golden, {inbox_count} inbox. Memory: {collection.count()} chunks total.")
 
 

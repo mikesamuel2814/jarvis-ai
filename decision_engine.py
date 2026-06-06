@@ -384,29 +384,55 @@ def check_services_smart(state: dict):
         alert_key = f"svc_down_{svc}"
 
         if not is_active and _cooldown_ok(state, alert_key):
-            # Create a pending approval request via Jarvis API
-            try:
-                resp = requests.post(
-                    f"http://localhost:{api_port}/action",
-                    json={"action": f"restart_{svc.replace('-','_').replace('jarvis_telegram','telegram')}", "arg": ""},
-                    headers=_api_headers(),
-                    timeout=10,
-                )
-                d = resp.json()
-                req_id = d.get("request_id", "")
-                msg = (
-                    f"🔴 *{desc} is DOWN*\n"
-                    f"Jarvis detected `{svc}` stopped.\n\n"
-                    f"Tap to restart:\n`/approve {req_id}`"
-                )
-            except Exception:
-                msg = f"🔴 *{desc} is DOWN* (`{svc}`)\nRun: `sudo systemctl restart {svc}`"
+            action_name = f"restart_{svc.replace('-','_').replace('jarvis_telegram','telegram')}"
 
-            _notify(
-                msg,
-                voice_text=f"Sir, {desc} has gone down. Please check Telegram to restart it.",
-            )
-            _log_decision(f"{svc} down", "Sent restart approval request to Mike", False)
+            # Check autonomy: if this restart is pre-approved/learned-safe, execute directly
+            auto_restarted = False
+            try:
+                from autonomy import should_auto_execute, log_execution_outcome
+                auto_ok, auto_reason = should_auto_execute(action_name)
+                if auto_ok:
+                    result = subprocess.run(
+                        ["sudo", "-n", "systemctl", "restart", svc],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    success = result.returncode == 0
+                    log_execution_outcome(action_name, success=success, auto=True)
+                    if success:
+                        _notify(
+                            f"⚡ *{desc} auto-restarted* — was down, now recovering.\n_{auto_reason}_",
+                            voice_text=f"Sir, {desc} was down. I've restarted it automatically.",
+                        )
+                        _log_decision(f"{svc} down", f"Auto-restarted ({auto_reason})", True)
+                        auto_restarted = True
+            except Exception:
+                pass
+
+            if not auto_restarted:
+                # Create a pending approval request via Jarvis API
+                try:
+                    resp = requests.post(
+                        f"http://localhost:{api_port}/action",
+                        json={"action": action_name, "arg": ""},
+                        headers=_api_headers(),
+                        timeout=10,
+                    )
+                    d = resp.json()
+                    req_id = d.get("request_id", "")
+                    msg = (
+                        f"🔴 *{desc} is DOWN*\n"
+                        f"Jarvis detected `{svc}` stopped.\n\n"
+                        f"Tap to restart:\n`/approve {req_id}`"
+                    )
+                except Exception:
+                    msg = f"🔴 *{desc} is DOWN* (`{svc}`)\nRun: `sudo systemctl restart {svc}`"
+
+                _notify(
+                    msg,
+                    voice_text=f"Sir, {desc} has gone down. Please check Telegram to restart it.",
+                )
+                _log_decision(f"{svc} down", "Sent restart approval request to Mike", False)
+
             _cooldown_set(state, alert_key)
             state[key] = True
             _log(f"Service down alert: {svc}")

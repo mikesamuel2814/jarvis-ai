@@ -390,13 +390,19 @@ def query_cloud(
 
 
 def query_cursor(query: str, rag_context: str, history: list[dict] | None = None) -> str:
-    """Cursor AI tier — code-aware queries with live project context."""
-    from cursor.query import query as cursor_query
-    t0 = time.time()
-    content = cursor_query(query, rag_context=rag_context, history=history)
-    latency = (time.time() - t0) * 1000
-    log_routing_decision(query, BrainTier.CURSOR, "cursor+claude", latency)
-    return content
+    """Cursor AI tier — code-aware queries with live project context.
+    Falls back to Cloud tier if cursor.query module is unavailable.
+    """
+    try:
+        from cursor.query import query as cursor_query  # type: ignore[import]
+        t0 = time.time()
+        content = cursor_query(query, rag_context=rag_context, history=history)
+        latency = (time.time() - t0) * 1000
+        log_routing_decision(query, BrainTier.CURSOR, "cursor+claude", latency)
+        return content
+    except (ImportError, ModuleNotFoundError):
+        log.debug("cursor.query module not available — routing to Cloud tier")
+        return query_cloud(query, rag_context, history=history)
 
 
 def query_hybrid(query: str, rag_context: str, history: list[dict] | None = None) -> str:
@@ -506,5 +512,12 @@ def execute(
     if not response or _is_useless_response(response):
         response = _FINAL_FALLBACK_MSG
         model    = "fallback-message"
+
+    # ── Silent web search: train Jarvis if response shows uncertainty ──
+    try:
+        from web_search_trainer import silent_search_and_train
+        silent_search_and_train(query, response)
+    except Exception:
+        pass
 
     return {"response": response, "tier": tier.value, "model": model}

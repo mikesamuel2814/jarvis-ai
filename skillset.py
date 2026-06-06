@@ -8,6 +8,7 @@ This is the single source of truth for Jarvis's autonomous behavior.
 Persists to ~/.jarvis/data/skillset.json
 """
 
+import copy
 import json
 import logging
 import os
@@ -58,25 +59,26 @@ DEFAULT_SKILLSET = {
 
 
 def load() -> dict:
-    """Load skillset from JSON. Returns defaults if file missing."""
+    """Load skillset from JSON. Returns deep-copied defaults if file missing."""
     if SKILLSET_FILE.exists():
         try:
             return json.loads(SKILLSET_FILE.read_text())
         except Exception as e:
             log.warning(f"Failed to load skillset: {e}. Using defaults.")
-            return DEFAULT_SKILLSET.copy()
-    return DEFAULT_SKILLSET.copy()
+            return copy.deepcopy(DEFAULT_SKILLSET)
+    return copy.deepcopy(DEFAULT_SKILLSET)
 
 
 def save(data: dict) -> bool:
     """Atomically write skillset to JSON."""
     try:
         SKILLSET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Update timestamp before writing so file reflects current time
+        data.setdefault("metadata", {})["last_updated"] = datetime.utcnow().isoformat()
         # Write to temp file first, then atomic rename
         tmp = SKILLSET_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
         tmp.replace(SKILLSET_FILE)
-        data["metadata"]["last_updated"] = datetime.utcnow().isoformat()
         log.debug(f"Skillset saved: {len(data['rules'])} rules, {len(data['skills'])} skills")
         return True
     except Exception as e:
@@ -137,13 +139,13 @@ def get_prompt_injection(query: str = "", n: int = 5) -> str:
     if query:
         query_words = set(query.lower().split())
         scored = []
-        for r in rules:
+        for i, r in enumerate(rules):
             rule_words = set(r["rule"].lower().split())
             overlap = len(query_words & rule_words)
             score = (overlap * 2) + (r["priority"] / 10.0) + (r["hits"] / 100.0)
-            scored.append((score, r))
-        scored.sort(reverse=True)
-        top_rules = [r for _, r in scored[:n]]
+            scored.append((score, i, r))  # i breaks ties without comparing dicts
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        top_rules = [r for _, _, r in scored[:n]]
     else:
         # No query: return highest-priority rules
         top_rules = sorted(rules, key=lambda r: (-r["priority"], -r["hits"]))[:n]

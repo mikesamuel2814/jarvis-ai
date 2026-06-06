@@ -922,6 +922,24 @@ def execute_action(req: ActionRequest):
     entry = ACTIONS[req.action]
     tier = entry["tier"]
 
+    # Check autonomy: learned-safe or pre-approved actions skip the approval gate
+    # even if their executor tier is CONFIRM/APPROVE.
+    if not req.skip_permission and tier != AUTO:
+        try:
+            from autonomy import should_auto_execute, log_execution_outcome
+            auto_ok, auto_reason = should_auto_execute(req.action)
+            if auto_ok:
+                result = run_action(req.action, req.arg or "")
+                log_execution_outcome(req.action, success=result.get("status") == "ok", auto=True)
+                if not req.silent:
+                    _send_telegram_direct(
+                        f"⚡ Auto-executed: *{entry['desc']}*\n_{auto_reason}_"
+                        + (f"\n```\n{str(result.get('output',''))[:300]}\n```" if result.get("output") else "")
+                    )
+                return result
+        except Exception as _ae:
+            pass  # autonomy unavailable — fall through to normal approval
+
     if tier == AUTO or req.skip_permission:
         result = run_action(req.action, req.arg or "")
         return result
