@@ -106,7 +106,8 @@ def get_orchestrator():
     global _orchestrator
     if _orchestrator is None:
         from orchestrator import Orchestrator
-        _orchestrator = Orchestrator(tool_registry=get_tool_registry())
+        worker_count = V3_CONFIG.get("swarm", {}).get("worker_count", 1)
+        _orchestrator = Orchestrator(tool_registry=get_tool_registry(), worker_count=worker_count)
     return _orchestrator
 
 
@@ -201,6 +202,7 @@ def list_actions(x_api_key: str = Header(default=None)):
 @app.post("/v2/action/{action_name}")
 def run_v2_action(action_name: str, payload: dict = {}, x_api_key: str = Header(default=None)):
     require_api_key(x_api_key)
+    get_tool_registry()  # ensure tools are loaded
     from tools.compat import run_action
     result = run_action(action_name, arg=payload.get("arg", ""), approved=payload.get("approved", False))
     return result
@@ -212,6 +214,7 @@ def run_v2_action(action_name: str, payload: dict = {}, x_api_key: str = Header(
 def action_post(payload: dict = {}, x_api_key: str = Header(default=None)):
     """v2-compatible action endpoint. Returns {success, output, action, tier, request_id}."""
     require_api_key(x_api_key)
+    get_tool_registry()  # ensure tools are loaded
     from tools.compat import run_action
     action_name = payload.get("action", "")
     arg = payload.get("arg", "")
