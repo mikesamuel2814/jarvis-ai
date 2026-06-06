@@ -35,7 +35,7 @@ log = logging.getLogger("jarvis.browser")
 
 _CHROME_BIN      = "/usr/bin/chromium"
 _CHROMEDRIVER    = "/usr/bin/chromedriver"
-_PAGE_TIMEOUT    = 20_000   # ms
+_PAGE_TIMEOUT    = 12_000   # ms — fail crash-prone heavy SPAs fast (we fall back to snippets)
 _IMPLICIT_WAIT   = 8        # seconds
 _MAX_ATTEMPTS    = 3        # open_url tries (1 + 2 fresh-driver crash retries)
 _IDLE_TIMEOUT    = 30       # seconds of inactivity → auto-close the browser (CPU backstop)
