@@ -35,7 +35,7 @@ def load_config():
         return {
             "memory": {
                 "path": str(JARVIS_HOME / "memory"),
-                "embedding_model": "nomic-embed-text",
+                "embedding_model": "mxbai-embed-large",
             },
             "data_sources": {
                 "claude_sessions": str(JARVIS_HOME / "data" / "claude"),
@@ -68,9 +68,11 @@ def get_chroma_client(config):
     return chromadb.PersistentClient(path=memory_path)
 
 
-def get_embedding(text, model="nomic-embed-text"):
+def get_embedding(text, model="mxbai-embed-large"):
     try:
-        response = ollama.embeddings(model=model, prompt=text[:4096])
+        # keep_alive=0 unloads the embedding model from VRAM immediately after
+        # use, freeing space for chat models (6GB VRAM constraint).
+        response = ollama.embeddings(model=model, prompt=text[:4096], keep_alive=0)
         return response["embedding"]
     except Exception as e:
         log(f"Embedding error: {e}")
@@ -410,7 +412,7 @@ def print_stats(collection):
 
 
 def run_indexing(config):
-    embed_model = config["memory"].get("embedding_model", "nomic-embed-text")
+    embed_model = config["memory"].get("embedding_model", "mxbai-embed-large")
     client = get_chroma_client(config)
     collection = client.get_or_create_collection(
         name="jarvis_memory",
@@ -442,7 +444,7 @@ def run_indexing(config):
     return collection
 
 
-def query_memory(collection, query_text, n_results=5, embed_model="nomic-embed-text"):
+def query_memory(collection, query_text, n_results=5, embed_model="mxbai-embed-large"):
     emb = get_embedding(query_text, embed_model)
     if emb is None:
         return []
@@ -476,7 +478,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config()
-    embed_model = config["memory"].get("embedding_model", "nomic-embed-text")
+    embed_model = config["memory"].get("embedding_model", "mxbai-embed-large")
     client = get_chroma_client(config)
     collection = client.get_or_create_collection(
         name="jarvis_memory",

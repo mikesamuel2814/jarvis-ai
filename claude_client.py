@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -31,28 +32,71 @@ CLAUDE_LOG   = JARVIS_HOME / "logs" / "claude_api.log"
 DEFAULT_MODEL = "claude-sonnet-4-6"
 CLI_TIMEOUT   = 120  # seconds
 
-# Privacy blocklist — never sent to cloud
-_PRIVACY_BLOCKLIST = [
-    "Payment-Gateway", "AsthaCash", ".ssh", "credentials",
-    ".env", "secrets", "private_key", "id_rsa", "id_ed25519",
+# Privacy patterns — actual secret material, NOT project/word names.
+# Each entry is a compiled regex; a match means the text must not go to cloud.
+#
+# What IS blocked:  real secret values — API keys, tokens, private key PEM blocks,
+#                   password/secret assignments, AWS key IDs, shell env exports with
+#                   a secret-looking value.
+# What is NOT blocked: project names (AsthaCash, Payment-Gateway, Starline, etc.),
+#                      file-path fragments, or any ordinary words.
+_SECRET_PATTERNS: list[re.Pattern] = [
+    # OpenAI / Anthropic / generic sk- keys
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b"),
+    # AWS Access Key IDs
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    # AWS Secret Access Keys (40-char base64ish after assignment)
+    re.compile(r'(?:aws_secret_access_key|AWS_SECRET)["\s]*[=:]["\s]*[A-Za-z0-9/+]{40}\b', re.IGNORECASE),
+    # Generic secret/password/token variable assignments with a non-trivial value
+    re.compile(
+        r'(?:password|passwd|secret|token|api[_\-]?key|auth[_\-]?key|private[_\-]?key)'
+        r'\s*[=:]\s*["\']?[A-Za-z0-9!@#$%^&*()\-_+={}\[\]|\\:;<>,.?/`~]{8,}',
+        re.IGNORECASE,
+    ),
+    # PEM private key blocks
+    re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+    # Shell export with a secret-looking assignment
+    re.compile(
+        r'\bexport\s+[A-Z_]{3,}(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)[A-Z_]*\s*=\s*\S{8,}',
+        re.IGNORECASE,
+    ),
+    # GitHub / GitLab personal access tokens
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|glpat)_[A-Za-z0-9_]{20,}\b"),
+    # Generic long hex strings that look like secrets (32+ hex chars not in URLs)
+    re.compile(r'(?<![./\w])[0-9a-f]{32,}(?![./\w])', re.IGNORECASE),
 ]
 
 
-def _load_privacy_blocklist() -> list[str]:
+def _load_extra_patterns() -> list[re.Pattern]:
+    """
+    Load additional regex patterns from jarvis_v2.yaml under
+    claude.privacy_patterns (list of regex strings).  Never raises.
+    """
     try:
-        cfg = yaml.safe_load(CONFIG_FILE.read_text())
-        return cfg.get("claude", {}).get("privacy_blocklist", _PRIVACY_BLOCKLIST)
+        cfg = yaml.safe_load(CONFIG_FILE.read_text()) or {}
+        raw = cfg.get("claude", {}).get("privacy_patterns", [])
+        return [re.compile(p) for p in raw if isinstance(p, str)]
     except Exception:
-        return _PRIVACY_BLOCKLIST
+        return []
 
 
 def _check_privacy(text: str) -> None:
-    """Raise ValueError if text contains any blocked pattern."""
-    for pattern in _load_privacy_blocklist():
-        if pattern.lower() in text.lower():
+    """
+    Raise ValueError if text appears to contain real secret material.
+
+    Uses regex patterns matching actual secret formats (API keys, PEM blocks,
+    password assignments, etc.).  Plain project names, file paths, and ordinary
+    words are never blocked.
+    """
+    all_patterns = _SECRET_PATTERNS + _load_extra_patterns()
+    for pat in all_patterns:
+        m = pat.search(text)
+        if m:
+            # Surface the matched fragment (truncated) so the caller can diagnose
+            snippet = m.group(0)[:40].replace("\n", " ")
             raise ValueError(
-                f"Privacy boundary: text contains '{pattern}'. "
-                "Cannot send to Claude cloud."
+                f"Privacy boundary: text contains a secret-like pattern "
+                f"(matched: '{snippet}...'). Cannot send to Claude cloud."
             )
 
 
@@ -161,7 +205,6 @@ class ClaudeClient:
 
     def extract_json(self, prompt: str, system: str = "") -> dict:
         """Ask Claude to return JSON; strips markdown fences."""
-        import re
         content, _ = self.query(
             system=system or "Return valid JSON only. No markdown fences, no explanation.",
             user=prompt,

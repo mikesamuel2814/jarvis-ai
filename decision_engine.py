@@ -15,7 +15,7 @@ from pathlib import Path
 import psutil
 import requests
 
-JARVIS_HOME = Path.home() / ".jarvis"
+JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 DECISION_LOG   = JARVIS_HOME / "data" / "decisions.jsonl"
 DECISION_STATE = JARVIS_HOME / "data" / "decision_state.json"
 
@@ -35,7 +35,8 @@ def _api_key() -> str:
 
 
 def _api_headers() -> dict:
-    return {"X-API-Key": _api_key()} if _api_key() else {}
+    key = _api_key()
+    return {"X-API-Key": key} if key else {}
 
 VPS_HOST = "38.47.35.16"
 VPS_USER = "admin93"
@@ -148,7 +149,9 @@ def _notify(text_msg: str, voice_text: str | None = None, parse_mode: str = "Mar
         token, chat_id = _get_telegram_creds()
         if token and chat_id:
             try:
-                sys.path.insert(0, str(JARVIS_HOME))
+                jarvis_str = str(JARVIS_HOME)
+                if jarvis_str not in sys.path:
+                    sys.path.insert(0, jarvis_str)
                 from voice import send_voice_telegram
                 send_voice_telegram(voice_text, token, chat_id)
             except Exception:
@@ -371,8 +374,12 @@ def check_services_smart(state: dict):
         pass
 
     for svc, desc in services.items():
-        r = subprocess.run(["systemctl", "is-active", svc], capture_output=True, text=True)
-        is_active = r.stdout.strip() == "active"
+        try:
+            r = subprocess.run(["systemctl", "is-active", svc], capture_output=True, text=True, timeout=5)
+            is_active = r.stdout.strip() == "active"
+        except Exception:
+            is_active = True  # assume active on timeout/error — avoid false-positive alerts
+            continue
         key = f"svc_smart_{svc}"
         alert_key = f"svc_down_{svc}"
 
@@ -433,7 +440,7 @@ def check_vps_processes(state: dict):
              f"admin93@{vps_host}", "pm2 jlist 2>/dev/null"],
             capture_output=True, text=True, timeout=15,
         )
-        if r.returncode != 0:
+        if r.returncode != 0 or not r.stdout.strip():
             return
         procs = json.loads(r.stdout.strip())
         for proc in procs:
@@ -625,7 +632,7 @@ def check_high_resource(state: dict):
 
 def run_decision_engine() -> int:
     state = load_state()
-    n = 0
+    errors = 0
     checks = [
         check_morning_briefing,
         check_services_smart,
@@ -640,8 +647,9 @@ def run_decision_engine() -> int:
             check(state)
         except Exception as e:
             _log(f"{check.__name__} failed: {e}")
+            errors += 1
     save_state(state)
-    return n
+    return errors
 
 
 if __name__ == "__main__":

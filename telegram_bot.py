@@ -314,11 +314,12 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
         add_to_history(uid, "assistant", answer)
         return answer, iid
     except requests.exceptions.ConnectionError:
-        return "Jarvis API is not running. Try: sudo systemctl start jarvis", None
+        return "⚠️ Sorry Sir, Jarvis API is not running. Ask me to restart it if needed.", None
     except requests.exceptions.Timeout:
-        return "Jarvis took too long to respond. The model may be busy.", None
+        return "⏳ Sorry Sir, Jarvis took too long to respond. The model may be busy — please try again.", None
     except Exception as e:
-        return f"Error: {e}", None
+        log.warning("query_jarvis error: %s", e)
+        return "⚠️ Sorry Sir, something went wrong processing your request. Please try again.", None
 
 
 def _bar(pct: float, width: int = 10) -> str:
@@ -348,23 +349,32 @@ def _check_icon(key: str, val) -> str:
 def get_stats() -> str:
     """Jarvis brain stats card (HTML)."""
     try:
-        from fmt import bold, code, progress_bar, esc
+        from fmt import bold, code, italic, progress_bar, esc
         resp = requests.get(f"{API_BASE}/stats", headers=_ah(), timeout=10)
         resp.raise_for_status()
         d = resp.json()
         chunks    = d.get("total_chunks", d.get("memory_chunks", 0))
         model     = d.get("primary_model", d.get("model", "deepseek-r1:7b"))
+        uptime    = d.get("uptime_hours", "")
         breakdown = d.get("source_type_breakdown", {})
         top       = sorted(breakdown.items(), key=lambda x: -x[1])
-        src_lines = "  ".join(f"<code>{esc(k)}:{v}</code>" for k, v in top)
-        return (
-            f"🧠 {bold('Jarvis Brain')}\n\n"
-            f"Model: {code(model)}\n"
-            f"Memory: {code(f'{chunks:,}')} chunks\n\n"
-            f"Sources:\n{src_lines}"
-        )
+
+        lines = [
+            f"🧠 {bold('Jarvis Brain Stats')}\n",
+            f"  Model   {code(model)}",
+            f"  Memory  {code(f'{chunks:,} chunks')}",
+        ]
+        if uptime:
+            lines.append(f"  Uptime  {code(f'{uptime}h')}")
+        if top:
+            src_parts = "  ".join(f"{code(esc(k))} {v}" for k, v in top)
+            lines.append(f"\n{bold('Memory Sources')}\n  {src_parts}")
+        return "\n".join(lines)
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Sorry Sir, Jarvis API is not reachable right now."
     except Exception as e:
-        return f"Stats unavailable: {e}"
+        log.warning("get_stats error: %s", e)
+        return "⚠️ Sorry Sir, stats are temporarily unavailable."
 
 
 def get_health() -> str:
@@ -385,8 +395,11 @@ def get_health() -> str:
             f"{'✅' if ollama=='ok' else '❌'} Ollama: {code(ollama)}\n"
             f"{'✅' if chroma=='ok' else '❌'} ChromaDB: {code(chroma)}{mem_str}"
         )
+    except requests.exceptions.ConnectionError:
+        return "❌ Sorry Sir, Jarvis API is not reachable right now."
     except Exception as e:
-        return f"Health check failed: {e}"
+        log.warning("get_health error: %s", e)
+        return "⚠️ Sorry Sir, health check is temporarily unavailable."
 
 
 def get_sysinfo() -> str:
@@ -404,7 +417,13 @@ def get_sysinfo() -> str:
         model     = st.get("primary_model", "deepseek-r1:7b")
         breakdown = st.get("source_type_breakdown", {})
         top2      = sorted(breakdown.items(), key=lambda x: -x[1])[:3]
-        src       = "  ".join(f"<code>{esc(k)}:{v}</code>" for k, v in top2)
+        src       = "  ".join(f"{code(esc(k))} {v}" for k, v in top2)
+
+        def _safe_float(v, default: float = 0.0) -> float:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
 
         cpu_pct  = si.get("cpu_percent", 0)
         cores    = si.get("cpu_cores", "?")
@@ -426,26 +445,32 @@ def get_sysinfo() -> str:
             f"{svc_icon} {bold('Jarvis System Status')}",
             "",
             f"🧠 {bold('Brain')}",
-            f"  Model: {code(model)}",
-            f"  Memory: {code(f'{chunks:,}')} chunks",
-            f"  {src}" if src else "",
+            f"  Model   {code(model)}",
+            f"  Memory  {code(f'{chunks:,} chunks')}",
+            (f"  Sources {src}") if src else "",
             "",
             f"🖥 {bold('Hardware')}",
-            f"  CPU  {code(f'{cpu_pct}%')} {progress_bar(float(cpu_pct))}  {code(f'{cores}c/{threads}t')}",
-            f"  RAM  {code(f'{ram_used}/{ram_tot} GB')} {progress_bar(float(ram_pct))}",
-            f"  Disk {code(f'{d_used}/{d_tot} GB')} {progress_bar(float(d_pct))}",
+            f"  CPU   {code(f'{cpu_pct}%')} {progress_bar(_safe_float(cpu_pct))}  {code(f'{cores}c/{threads}t')}",
+            f"  RAM   {code(f'{ram_used}/{ram_tot} GB')} {progress_bar(_safe_float(ram_pct))}",
+            f"  Disk  {code(f'{d_used}/{d_tot} GB')} {progress_bar(_safe_float(d_pct))}",
         ]
         if gpu_util is not None:
-            vram_pct = round(gpu_used / max(gpu_tot, 1) * 100) if gpu_used and gpu_tot else 0
+            vram_pct = round(_safe_float(gpu_used) / max(_safe_float(gpu_tot), 1) * 100) if gpu_used and gpu_tot else 0
             lines.append(
-                f"  GPU  {code(f'{gpu_util}%')} {progress_bar(gpu_util)}  "
-                f"VRAM {code(f'{gpu_used}/{gpu_tot} MB')} {progress_bar(vram_pct)}  {code(f'{gpu_temp}°C')}"
+                f"  GPU   {code(f'{gpu_util}%')} {progress_bar(_safe_float(gpu_util))}"
+            )
+            lines.append(
+                f"  VRAM  {code(f'{gpu_used}/{gpu_tot} MB')} {progress_bar(vram_pct)}"
+                + (f"  🌡 {code(f'{gpu_temp}°C')}" if gpu_temp is not None else "")
             )
 
-        lines += ["", italic(f"Uptime {uptime}h — {hostname}")]
-        return "\n".join(l for l in lines if l is not None)
+        lines += ["", italic(f"⏱ Uptime {uptime}h — {esc(str(hostname))}")]
+        return "\n".join(line for line in lines if line is not None)
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Sorry Sir, Jarvis API is not reachable right now."
     except Exception as e:
-        return f"Could not fetch stats: {e}"
+        log.warning("get_sysinfo error: %s", e)
+        return "⚠️ Sorry Sir, system info is temporarily unavailable."
 
 
 def trigger_index() -> str:
@@ -453,42 +478,48 @@ def trigger_index() -> str:
         resp = requests.post(f"{API_BASE}/index", json={}, headers=_ah(), timeout=300)
         resp.raise_for_status()
         d = resp.json()
-        return f"Indexing complete. Total chunks: {d.get('chunks', 'N/A')}"
+        chunks = d.get("chunks", "N/A")
+        return f"✅ Indexing complete — {chunks} chunks in memory."
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Sorry Sir, Jarvis API is not reachable right now."
     except Exception as e:
-        return f"Indexing error: {e}"
+        log.warning("trigger_index error: %s", e)
+        return "⚠️ Sorry Sir, indexing encountered an error. Check logs for details."
 
 
 HELP_TEXT = (
-    "🤖 <b>Jarvis Commands</b>\n\n"
-    "<b>📊 Status</b>\n"
+    "🤖 <b>Jarvis — Personal AI Assistant</b>\n"
+    "<i>Welcome, Sir. Here's everything I can do:</i>\n\n"
+    "━━━ <b>📊 Status &amp; Health</b> ━━━\n"
     "/stats — Brain &amp; memory stats\n"
-    "/sysinfo — Live CPU/RAM/GPU/Disk\n"
+    "/sysinfo — Live CPU / RAM / GPU / Disk\n"
     "/health — Service health check\n"
     "/selfcheck — Full system self-check\n\n"
-    "<b>🔍 Web &amp; Research</b>\n"
+    "━━━ <b>🔍 Web &amp; Research</b> ━━━\n"
     "/web <i>query</i> — Real-time web search + AI answer\n"
     "/weather <i>[city]</i> — Current weather\n"
     "/browse <i>url</i> — Open URL in headless browser\n\n"
-    "<b>⚡ Actions</b>\n"
+    "━━━ <b>⚡ Actions &amp; Tasks</b> ━━━\n"
     "/exec <i>cmd</i> — Smart dispatch (plan + execute)\n"
     "/task <i>desc</i> — Delegate to Claude Code (async)\n"
     "/actions — List available actions\n"
     "/pending — Show pending approvals\n"
     "/approve <i>ID</i> — Approve a pending action\n"
     "/deny <i>ID</i> — Deny a pending action\n\n"
-    "<b>🛡 Security (Kali)</b>\n"
+    "━━━ <b>🛡 Security (Kali)</b> ━━━\n"
     "/kali <i>tool target</i> — Run pentest tool\n"
     "/scans — List recent scan reports\n\n"
-    "<b>🧠 Learning</b>\n"
+    "━━━ <b>🧠 Learning &amp; Memory</b> ━━━\n"
     "/correct <i>text</i> — Correct last answer (trains brain)\n"
     "/learn — Run brain training now\n"
     "/index — Re-index your work\n\n"
-    "<b>⚙️ Settings</b>\n"
+    "━━━ <b>⚙️ Settings</b> ━━━\n"
     "/remember <i>key value</i> — Save a personal fact\n"
     "/voice on|off — Toggle voice audio responses\n"
-    "/clear — Clear chat history\n\n"
-    "<i>Tap 👍 or 👎 after each reply to train Jarvis.</i>\n"
-    "<i>Or just chat — Jarvis remembers your conversation.</i>"
+    "/clear — Clear chat history\n"
+    "/help — Show this message\n\n"
+    "<i>💡 Tip: Tap 👍 or 👎 after any reply to train Jarvis.</i>\n"
+    "<i>Or just chat naturally — Jarvis understands context.</i>"
 )
 
 
@@ -755,8 +786,11 @@ def run_action_via_api(action: str, arg: str = "") -> str:
         if not output:
             return f"{icon} Done."
         return f"{icon} {_format_action_output(action, output)}"
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Sorry Sir, Jarvis API is not reachable right now."
     except Exception as e:
-        return f"Action error: {e}"
+        log.warning("run_action_via_api error for %s: %s", action, e)
+        return "⚠️ Sorry Sir, the action could not be completed. Check logs for details."
 
 
 def main():
@@ -801,7 +835,15 @@ def main():
         uid = update.effective_user.id
         _cache_chat_id(uid)
         _histories[uid] = deque(maxlen=MAX_HISTORY)
-        await send(update, f"Jarvis online. I'm {OWNER}'s personal AI assistant.\n\n{HELP_TEXT}")
+        from fmt import bold, italic, esc
+        welcome = (
+            f"👋 {bold('Jarvis is online, Sir!')}\n\n"
+            f"{italic('Your personal AI brain is ready.')}\n"
+            f"I can answer questions, run system commands, search the web, "
+            f"analyse images, and manage your projects.\n\n"
+            + HELP_TEXT
+        )
+        await send(update, welcome)
 
     async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, HELP_TEXT)
@@ -890,16 +932,18 @@ def main():
             await send(update, f"Error: {esc(str(e))}")
 
     async def deny_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from fmt import esc
         args = context.args
         if not args:
-            await send(update, "Usage: /deny REQUEST_ID")
+            await send(update, "Usage: /deny <i>REQUEST_ID</i>")
             return
         req_id = args[0].upper()
         try:
             requests.post(f"{API_BASE}/deny/{req_id}", headers=_ah(), timeout=10)
-            await send(update, f"❌ Denied: {req_id}")
+            await send(update, f"❌ Denied: <code>{esc(req_id)}</code>")
         except Exception as e:
-            await send(update, f"Error: {e}")
+            log.warning("deny_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the denial request could not be sent.")
 
     async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -924,15 +968,19 @@ def main():
                 from fmt import bold, pre, esc
                 reply = f"{icon} {bold('Done')}\n\n{pre(esc(output[:1500]))}" if output else f"{icon} {bold('Done.')}"
                 await query.edit_message_text(reply, parse_mode="HTML")
+            except requests.exceptions.ConnectionError:
+                await query.edit_message_text("⚠️ Sorry Sir, Jarvis API is not reachable right now.")
             except Exception as e:
-                await query.edit_message_text(f"Error: {e}")
+                log.warning("button approve error: %s", e)
+                await query.edit_message_text("⚠️ Sorry Sir, the approval could not be processed.")
         elif data.startswith("deny_"):
             req_id = data.split("_", 1)[1]
             try:
                 requests.post(f"{API_BASE}/deny/{req_id}", headers=_ah(), timeout=10)
-                await query.edit_message_text(f"❌ Denied")
+                await query.edit_message_text("❌ Denied.")
             except Exception as e:
-                await query.edit_message_text(f"Error: {e}")
+                log.warning("button deny error: %s", e)
+                await query.edit_message_text("⚠️ Sorry Sir, the denial could not be processed.")
 
         elif data.startswith("cmd_"):
             cmd = data[4:]
@@ -946,20 +994,32 @@ def main():
                 try:
                     d = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20).json()
                     overall = d.get("overall", "unknown")
-                    icon = "✅" if overall == "ok" else "⚠️"
+                    icon = "✅" if overall == "ok" else ("⚠️" if overall == "degraded" else "❌")
                     from fmt import bold, code, esc
-                    lines = [f"{icon} {bold('Jarvis Self-Check')} — {esc(overall.upper())}\n"]
-                    for k, v in d.get("checks", {}).items():
-                        lines.append(f"{_check_icon(k, v)} {code(esc(k))}: {esc(str(v))}")
+                    lines = [f"{icon} {bold('Jarvis Self-Check')} — {bold(esc(overall.upper()))}\n"]
+                    checks = d.get("checks", {})
+                    for k, v in checks.items():
+                        lines.append(f"  {_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
+                    if not checks:
+                        lines.append("  <i>No check data returned.</i>")
+                    issues = d.get("issues", [])
+                    if issues:
+                        lines.append(f"\n{bold('⚠️ Issues:')}")
+                        for iss in issues:
+                            lines.append(f"  • {esc(str(iss))}")
                     reply = "\n".join(lines)
+                except requests.exceptions.ConnectionError:
+                    reply = "⚠️ Sorry Sir, Jarvis API is not reachable right now."
                 except Exception as e:
-                    reply = f"Self-check failed: {e}"
+                    log.warning("button selfcheck error: %s", e)
+                    reply = "⚠️ Sorry Sir, the self-check could not be completed."
             elif cmd == "learn":
                 try:
                     requests.post(f"{API_BASE}/learn", headers=_ah(), timeout=10)
-                    reply = "🧠 Brain training started. Check /stats in a minute."
+                    reply = "🧠 Brain training started, Sir. Check /stats in a minute."
                 except Exception as e:
-                    reply = f"Error: {e}"
+                    log.warning("button learn error: %s", e)
+                    reply = "⚠️ Sorry Sir, brain training could not be started."
             elif cmd == "index":
                 reply = "🔄 Indexing started..."
                 await query.message.reply_text(reply)
@@ -976,29 +1036,38 @@ def main():
                          f"{bold('🔐 APPROVE')} ({len(appr)})\n" + "  ".join(code(esc(a)) for a in appr))
             elif cmd == "pending":
                 try:
-                    d = requests.get(f"{API_BASE}/pending", headers=_ah(), timeout=10).json() if hasattr(requests, 'x') else None
                     import json as _j, pathlib as _p
                     pf = _p.Path("/home/kali/.jarvis/data/pending_approvals.json")
                     pending = _j.loads(pf.read_text()) if pf.exists() else {}
                     if pending:
                         from fmt import bold, code, esc
-                        lines = [f"{bold('Pending Approvals')}\n"]
+                        lines = [f"{bold('⏳ Pending Approvals')}\n"]
                         for rid, req in pending.items():
-                            lines.append(f"• {code(esc(rid))} — {esc(req.get('action', '?'))}")
+                            lines.append(f"  • {code(esc(rid))} — {esc(str(req.get('action', '?')))}")
                         reply = "\n".join(lines)
                     else:
-                        reply = "No pending approvals."
+                        reply = "✅ No pending approvals, Sir."
                 except Exception as e:
-                    reply = f"Error: {e}"
+                    log.warning("button pending error: %s", e)
+                    reply = "⚠️ Sorry Sir, could not load pending approvals."
             else:
-                reply = f"Unknown command: {cmd}"
-            await query.message.reply_text(_to_html(reply), parse_mode="HTML")
+                reply = f"⚠️ Unknown command: <code>{esc(cmd)}</code>"
+            try:
+                await query.message.reply_text(_to_html(reply), parse_mode="HTML")
+            except Exception:
+                plain = re.sub(r"<[^>]+>", "", reply)
+                await query.message.reply_text(plain or "Done.")
 
         elif data.startswith("act_"):
             action = data[4:]
             await query.message.chat.send_action("typing")
             result = run_action_via_api(action)
-            await query.message.reply_text(_to_html(result), parse_mode="HTML")
+            try:
+                await query.message.reply_text(_to_html(result), parse_mode="HTML")
+            except Exception:
+                # Fallback to plain text if HTML rendering fails
+                plain = re.sub(r"<[^>]+>", "", result)
+                await query.message.reply_text(plain or "Done.")
 
     def _build_reference_keyboard() -> "InlineKeyboardMarkup":
         B = InlineKeyboardButton
@@ -1095,22 +1164,27 @@ def main():
         try:
             r = requests.post(f"{API_BASE}/correct", json={"interaction_id": iid, "correction": correction}, headers=_ah(), timeout=5)
             if r.ok:
-                await send(update, f"Correction saved. Jarvis will learn from this.")
+                await send(update, "✅ Correction saved, Sir. Jarvis will learn from this.")
             else:
-                await send(update, "Could not save correction.")
+                await send(update, "⚠️ Sorry Sir, the correction could not be saved right now.")
         except Exception as e:
-            await send(update, f"Error: {e}")
+            log.warning("correct_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the correction could not be saved. Please try again.")
 
     async def learn_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send(update, "Running brain training in background...")
         try:
             r = requests.post(f"{API_BASE}/learn", headers=_ah(), timeout=10)
             if r.ok:
-                await send(update, "Brain training started. Check /stats in a minute.")
+                await send(update, "🧠 Brain training started, Sir. Check /stats in a minute.")
             else:
-                await send(update, f"Error: {r.text}")
+                log.warning("learn_cmd API error: %s %s", r.status_code, r.text[:200])
+                await send(update, f"⚠️ Sorry Sir, brain training returned an error (HTTP {r.status_code}). Check logs.")
+        except requests.exceptions.ConnectionError:
+            await send(update, "⚠️ Sorry Sir, Jarvis API is not reachable right now.")
         except Exception as e:
-            await send(update, f"Error: {e}")
+            log.warning("learn_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, brain training could not be started. Check logs for details.")
 
     async def task_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Delegate a task to Claude Code (background, results via Telegram)."""
@@ -1157,8 +1231,11 @@ def main():
             d = resp.json()
             reply = d.get("response", "No response.")
             await send(update, reply)
+        except requests.exceptions.ConnectionError:
+            await send(update, "⚠️ Sorry Sir, Jarvis API is not reachable right now.")
         except Exception as e:
-            await send(update, f"Exec error: {e}")
+            log.warning("exec_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the command could not be dispatched. Check logs for details.")
 
     async def web_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Real-time web search + AI analysis. Usage: /web <query>"""
@@ -1179,31 +1256,31 @@ def main():
             answer, sources = web_answer(query_text, use_cloud=True)
 
             # ── 1. AI Summary ──────────────────────────────────────────────
-            summary_html = _to_html(answer)
+            summary_html = _to_html(answer) if answer else "<i>No summary available.</i>"
             await thinking_msg.edit_text(summary_html, parse_mode="HTML")
 
             # ── 2. Source cards (up to 5) ──────────────────────────────────
             if sources:
-                cards_html = f"🔗 {bold('Sources')}\n\n"
+                cards_html = f"🔗 {bold('Sources')}\n"
                 for i, s in enumerate(sources[:5], 1):
-                    title   = s.get("title", f"Source {i}")
+                    title   = s.get("title", f"Source {i}") or f"Source {i}"
                     url     = s.get("url", "")
-                    snippet = s.get("snippet", "") or s.get("full_text", "")
+                    snippet = (s.get("snippet") or s.get("full_text") or "").strip()
                     date    = s.get("date", "")[:10] if s.get("date") else ""
                     source  = s.get("source", "")
-                    meta    = "  ".join(filter(None, [date, source]))
+                    meta    = " · ".join(filter(None, [date, source]))
 
                     if url:
-                        header = f"{bold(link(esc(title[:80]), url))}"
+                        header = bold(link(esc(title[:80]), url))
                     else:
                         header = bold(esc(title[:80]))
 
-                    card_lines = [header]
+                    card_lines = [f"\n{i}. {header}"]
                     if meta:
-                        card_lines.append(italic(esc(meta)))
+                        card_lines.append(f"   {italic(esc(meta))}")
                     if snippet:
-                        card_lines.append(esc(snippet[:200]))
-                    cards_html += "\n".join(card_lines) + "\n\n"
+                        card_lines.append(f"   {esc(snippet[:180])}")
+                    cards_html += "\n".join(card_lines)
 
                 await update.message.reply_text(cards_html.strip(), parse_mode="HTML",
                     disable_web_page_preview=True)
@@ -1224,8 +1301,11 @@ def main():
                         pass
                     break  # one image is enough
 
+        except requests.exceptions.ConnectionError:
+            await thinking_msg.edit_text("⚠️ Sorry Sir, the web search service is not reachable right now.")
         except Exception as e:
-            await thinking_msg.edit_text(f"Web search error: {e}")
+            log.warning("web_cmd error: %s", e)
+            await thinking_msg.edit_text("⚠️ Sorry Sir, the web search encountered an error. Please try again.")
 
     async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Quick weather via wttr.in. Usage: /weather [city]"""
@@ -1268,7 +1348,8 @@ def main():
             if want_shot and png:
                 await update.message.reply_photo(photo=png, caption=f"📸 {title[:80]}")
         except Exception as e:
-            await thinking_msg.edit_text(f"Browse error: {e}")
+            log.warning("browse_cmd error: %s", e)
+            await thinking_msg.edit_text("⚠️ Sorry Sir, the browser could not open that page. It may be unreachable or require JavaScript.")
         finally:
             try:
                 quit_browser()  # close browser after each /browse → zero idle CPU
@@ -1298,7 +1379,8 @@ def main():
             else:
                 await send(update, f"❌ {tool}: {res.get('reason', 'failed')}")
         except Exception as e:
-            await send(update, f"OpenClaw error: {e}")
+            log.warning("oc_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, OpenClaw encountered an error. It may not be running.")
 
     async def kali_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Kali pentest tools (authorized security testing).
@@ -1312,7 +1394,8 @@ def main():
                 from kali_tools import list_tools
                 tools = list_tools()
             except Exception as e:
-                await send(update, f"Sir, Kali tools are not available: {e}")
+                log.warning("kali_cmd list_tools error: %s", e)
+                await send(update, "⚠️ Sorry Sir, the Kali tools module is not available. Check that kali_tools.py is installed.")
                 return
             level_names = {
                 1: "🔍 L1 Recon (passive, auto)",
@@ -1366,7 +1449,8 @@ def main():
         try:
             result = await loop.run_in_executor(None, run_action_via_api, action, arg)
         except Exception as e:
-            await send(update, f"Kali error: {e}")
+            log.warning("kali_cmd run error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the scan could not be started. Check logs for details.")
             return
 
         # run_action_via_api returns a string. For approve-tier it contains the
@@ -1400,24 +1484,33 @@ def main():
 
     async def selfcheck_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from fmt import bold, code, italic, esc
-        await send(update, "🔍 Running full system self-check…")
+        await send(update, "🔍 Running full system self-check, Sir…")
         try:
             r = requests.get(f"{API_BASE}/selfcheck", headers=_ah(), timeout=20)
             r.raise_for_status()
             d = r.json()
             overall = d.get("overall", "unknown")
-            emoji   = "✅" if overall == "ok" else "⚠️"
-            lines   = [f"{emoji} {bold('Jarvis Self-Check')} — {bold(overall.upper())}\n"]
-            for k, v in d.get("checks", {}).items():
-                lines.append(f"{_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
+            emoji   = "✅" if overall == "ok" else ("⚠️" if overall == "degraded" else "❌")
+            lines   = [f"{emoji} {bold('Jarvis Self-Check')} — {bold(esc(overall.upper()))}\n"]
+            checks = d.get("checks", {})
+            if checks:
+                for k, v in checks.items():
+                    lines.append(f"  {_check_icon(k, v)} {code(esc(k))}: {code(esc(str(v)))}")
+            else:
+                lines.append("  <i>No check data returned.</i>")
             issues = d.get("issues", [])
             if issues:
-                lines.append(f"\n{bold('Issues:')}")
+                lines.append(f"\n{bold('⚠️ Issues Found:')}")
                 for iss in issues:
-                    lines.append(f"  • {esc(iss)}")
+                    lines.append(f"  • {esc(str(iss))}")
+            else:
+                lines.append(f"\n<i>No issues detected.</i>")
             await send(update, "\n".join(lines))
+        except requests.exceptions.ConnectionError:
+            await send(update, "⚠️ Sorry Sir, Jarvis API is not reachable right now.")
         except Exception as e:
-            await send(update, f"Self-check failed: {esc(str(e))}")
+            log.warning("selfcheck_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the self-check could not be completed. Check logs for details.")
 
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1444,8 +1537,8 @@ def main():
                 else:
                     await update.message.reply_text(_to_html(part), parse_mode="HTML")
         except Exception as e:
-            log.error(f"Photo analysis error: {e}")
-            await thinking_msg.edit_text(f"Image analysis failed: {e}")
+            log.error("Photo analysis error: %s", e)
+            await thinking_msg.edit_text("⚠️ Sorry Sir, image analysis failed. The vision model may not be loaded.")
 
     async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1503,21 +1596,21 @@ def main():
                 await thinking_msg.edit_text(summary_html, parse_mode="HTML")
                 # Source cards
                 if sources:
-                    cards = f"🔗 {bold('Sources')}\n\n"
+                    cards = f"🔗 {bold('Sources')}\n"
                     for i, s in enumerate(sources[:4], 1):
-                        t   = esc(s.get("title", f"Source {i}")[:80])
-                        url = s.get("url", "")
-                        snip = esc((s.get("snippet") or s.get("full_text") or "")[:160])
-                        date = s.get("date", "")[:10]
-                        src  = s.get("source", "")
-                        meta = "  ".join(filter(None, [date, src]))
-                        header = bold(link(t, url)) if url else bold(t)
-                        line = header
+                        title_s = s.get("title", f"Source {i}") or f"Source {i}"
+                        url     = s.get("url", "")
+                        snip    = (s.get("snippet") or s.get("full_text") or "").strip()
+                        date    = s.get("date", "")[:10]
+                        src     = s.get("source", "")
+                        meta    = " · ".join(filter(None, [date, src]))
+                        header  = bold(link(esc(title_s[:80]), url)) if url else bold(esc(title_s[:80]))
+                        card_lines = [f"\n{i}. {header}"]
                         if meta:
-                            line += f"\n{italic(esc(meta))}"
+                            card_lines.append(f"   {italic(esc(meta))}")
                         if snip:
-                            line += f"\n{snip}"
-                        cards += line + "\n\n"
+                            card_lines.append(f"   {esc(snip[:180])}")
+                        cards += "\n".join(card_lines)
                     await update.message.reply_text(cards.strip(), parse_mode="HTML",
                         disable_web_page_preview=True)
                 # Image thumbnail
@@ -1534,8 +1627,11 @@ def main():
                         except Exception:
                             pass
                         break
+            except requests.exceptions.ConnectionError:
+                await thinking_msg.edit_text("⚠️ Sorry Sir, the web search service is not reachable right now.")
             except Exception as e:
-                await thinking_msg.edit_text(f"Web search error: {e}")
+                log.warning("handle_message web search error: %s", e)
+                await thinking_msg.edit_text("⚠️ Sorry Sir, the web search encountered an error. Please try again.")
             return
 
         # LLM query — send a placeholder first so user sees immediate feedback
@@ -1571,7 +1667,8 @@ def main():
                 import asyncio as _asyncio
                 _asyncio.get_event_loop().run_in_executor(None, _send_voice_for_response, response)
         except Exception as e:
-            await thinking_msg.edit_text(f"Error: {e}")
+            log.warning("handle_message LLM error: %s", e)
+            await thinking_msg.edit_text("⚠️ Sorry Sir, something went wrong. Please try again.")
 
     async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
         log.error(f"Telegram error: {context.error}")

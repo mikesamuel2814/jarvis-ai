@@ -102,7 +102,9 @@ def _chunk_id(prefix: str, text: str) -> str:
 def _embed(text: str, embed_model: str) -> list[float] | None:
     try:
         import ollama  # noqa: PLC0415
-        return ollama.embeddings(model=embed_model, prompt=text[:4096])["embedding"]
+        # keep_alive=0 unloads the embedding model from VRAM immediately after
+        # use, freeing space for deepseek-r1:7b (6GB VRAM constraint).
+        return ollama.embeddings(model=embed_model, prompt=text[:4096], keep_alive=0)["embedding"]
     except Exception:
         return None
 
@@ -168,6 +170,7 @@ def analyze_bad_interaction(query: str, response: str, correction: str | None) -
                 {"role": "user", "content": prompt},
             ],
             options={"temperature": 0.2, "num_predict": 256, "num_ctx": 1024},
+            keep_alive=0,
         )
         text = _strip(resp["message"]["content"]).strip()
         if len(text) > 10:
@@ -203,6 +206,7 @@ def summarize_good_interactions(interactions: list[dict]) -> str | None:
                 {"role": "user", "content": prompt},
             ],
             options={"temperature": 0.3, "num_predict": 256, "num_ctx": 1024},
+            keep_alive=0,
         )
         return _strip(resp["message"]["content"]).strip()
     except Exception:

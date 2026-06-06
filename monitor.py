@@ -280,9 +280,11 @@ def check_internet(state: dict, alerts: list):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3)
-        sock.connect(("8.8.8.8", 53))
-        sock.close()
-        online = True
+        try:
+            sock.connect(("8.8.8.8", 53))
+            online = True
+        finally:
+            sock.close()
     except Exception:
         online = False
 
@@ -477,6 +479,9 @@ def check_vps(cfg: dict, state: dict, alerts: list):
             state["vps_timeout"] = True
     except Exception as e:
         log(f"VPS check error: {e}")
+    else:
+        # Clear timeout flag on any successful SSH completion
+        state["vps_timeout"] = False
 
 
 def check_ssl(cfg: dict, alerts: list):

@@ -378,10 +378,14 @@ async def sysinfo():
         )
         if r.returncode == 0:
             parts = r.stdout.strip().split(",")
-            info["gpu_temp_c"]        = int(parts[0].strip())
-            info["gpu_mem_used_mb"]   = int(parts[1].strip())
-            info["gpu_mem_total_mb"]  = int(parts[2].strip())
-            info["gpu_util_percent"]  = int(parts[3].strip())
+            if len(parts) >= 4:
+                try:
+                    info["gpu_temp_c"]        = int(parts[0].strip())
+                    info["gpu_mem_used_mb"]   = int(parts[1].strip())
+                    info["gpu_mem_total_mb"]  = int(parts[2].strip())
+                    info["gpu_util_percent"]  = int(parts[3].strip())
+                except ValueError:
+                    info["gpu_raw"] = r.stdout.strip()
     except Exception:
         pass
     return info
