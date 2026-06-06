@@ -774,6 +774,154 @@ async def cache_stats():
     return {"kimi_today": today_cost()}
 
 
+# ── Self-test endpoints (Telegram /skills, /recall, /probe, /objectives) ────
+
+@app.get("/skills", dependencies=[Depends(require_api_key)])
+async def skills():
+    """Return executor action count, ChromaDB collection counts, and loaded Ollama models."""
+    result: dict[str, Any] = {}
+
+    # Executor action count
+    try:
+        from executor import ACTIONS
+        result["actions"] = len(ACTIONS)
+    except Exception as e:
+        result["actions"] = f"error: {e}"
+
+    # ChromaDB — all collections with counts
+    try:
+        chroma_client = chromadb.PersistentClient(path=str(JARVIS_HOME / "memory"))
+        collections_info: dict[str, int] = {}
+        total_chunks = 0
+        for col in chroma_client.list_collections():
+            col_obj = chroma_client.get_collection(col.name)
+            n = col_obj.count()
+            collections_info[col.name] = n
+            total_chunks += n
+        result["memory_chunks"] = total_chunks
+        result["collections"] = collections_info
+    except Exception as e:
+        result["memory_chunks"] = f"error: {e}"
+        result["collections"] = {}
+
+    # Ollama loaded/available models
+    try:
+        import requests as _req
+        r = _req.get("http://localhost:11434/api/tags", timeout=5)
+        r.raise_for_status()
+        result["models"] = [m.get("name", "") for m in r.json().get("models", [])]
+    except Exception as e:
+        result["models"] = f"error: {e}"
+
+    return result
+
+
+class RecallRequest(BaseModel):
+    topic: str = "mike profile"
+
+
+@app.post("/recall", dependencies=[Depends(require_api_key)])
+async def recall(req: RecallRequest):
+    """Return the top 5 memory chunks from ChromaDB about the given topic."""
+    query_text = req.topic if req.topic else "Mike Samuel profile preferences projects"
+    try:
+        col = get_collection()
+        emb = _embed_query(query_text)
+        query_kwargs: dict = {
+            "n_results": 5,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if emb is not None:
+            query_kwargs["query_embeddings"] = [emb]
+        else:
+            query_kwargs["query_texts"] = [query_text]
+        res = col.query(**query_kwargs)
+        docs      = res.get("documents", [[]])[0]
+        metas     = res.get("metadatas", [[]])[0]
+        distances = res.get("distances", [[]])[0]
+        chunks = []
+        for doc, meta, dist in zip(docs, metas, distances):
+            chunks.append({
+                "text":     doc[:500],
+                "source":   (meta or {}).get("source", ""),
+                "distance": round(dist, 4),
+            })
+        return {"topic": query_text, "chunks": chunks, "count": len(chunks)}
+    except Exception as e:
+        log.error("/recall failed: %s", e)
+        return {"topic": query_text, "chunks": [], "error": str(e)}
+
+
+class ProbeRequest(BaseModel):
+    prompt: str
+    model: str = "phi4-mini"
+
+
+@app.post("/probe", dependencies=[Depends(require_api_key)])
+async def probe(req: ProbeRequest):
+    """Run a single prompt through a local Ollama model and return response + timing."""
+    import time
+    import requests as _req
+
+    payload = {
+        "model": req.model,
+        "prompt": req.prompt,
+        "stream": False,
+        "options": {"num_ctx": 2048},
+    }
+    try:
+        t0 = time.time()
+        r = _req.post(
+            "http://localhost:11434/api/generate",
+            json=payload,
+            timeout=120,
+        )
+        r.raise_for_status()
+        data = r.json()
+        duration_ms = round((time.time() - t0) * 1000)
+        return {
+            "model":       data.get("model", req.model),
+            "response":    data.get("response", ""),
+            "duration_ms": duration_ms,
+            "tokens":      data.get("eval_count", 0),
+        }
+    except Exception as e:
+        log.error("/probe failed: %s", e)
+        return {"model": req.model, "response": f"error: {e}", "duration_ms": 0, "tokens": 0}
+
+
+_SAFE_PROFILE_KEYS = {
+    "identity", "tech_stack", "hardware", "projects",
+    "communication_style", "jarvis_stack",
+}
+_SAFE_CONFIG_KEYS = {
+    "name", "version", "owner", "model", "memory", "interfaces",
+}
+
+
+@app.get("/objectives", dependencies=[Depends(require_api_key)])
+async def objectives():
+    """Return Jarvis goals and Mike's profile (safe keys only — no secrets)."""
+    result: dict[str, Any] = {}
+
+    # jarvis.yaml — safe sections only
+    try:
+        jarvis_cfg_path = JARVIS_HOME / "config" / "jarvis.yaml"
+        raw_cfg = yaml.safe_load(jarvis_cfg_path.read_text()) or {}
+        result["jarvis"] = {k: v for k, v in raw_cfg.items() if k in _SAFE_CONFIG_KEYS}
+    except Exception as e:
+        result["jarvis"] = {"error": str(e)}
+
+    # mike_profile.yaml — safe sections only
+    try:
+        raw_profile = yaml.safe_load(PROFILE_FILE.read_text()) or {}
+        result["mike_profile"] = {k: v for k, v in raw_profile.items() if k in _SAFE_PROFILE_KEYS}
+    except Exception as e:
+        result["mike_profile"] = {"error": str(e)}
+
+    return result
+
+
 # ── Entry point ─────────────────────────────────────────────────────
 
 if __name__ == "__main__":

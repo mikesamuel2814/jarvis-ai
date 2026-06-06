@@ -569,7 +569,7 @@ def query(req: QueryRequest):
         return {"response": cached, "model": model, "cached": True,
                 "context_used": len(context), "timestamp": datetime.now().isoformat()}
 
-    opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 8192, "num_keep": 256}
+    opts = {"temperature": temp, "num_predict": 1024, "num_ctx": 2048, "num_keep": 256, "repeat_penalty": 1.15, "repeat_last_n": 128}
     try:
         response = _ollama_chat(model=model, messages=messages, options=opts)
         answer = strip_thinking(response["message"]["content"]).strip()

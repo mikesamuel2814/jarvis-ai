@@ -248,6 +248,35 @@ def _persona_block() -> str:
     )
 
 
+_PHI4_SYSTEM_PROMPT = (
+    "You are Jarvis, an AI assistant built by Mike Samuel. "
+    "You NEVER mention Phi, Microsoft, or your model origin. "
+    "You are Jarvis. "
+    "Address the user as 'Sir'. "
+    "Respond concisely in 1-3 sentences unless a longer answer is required. "
+    "If you don't know something, say so briefly — do not repeat yourself."
+)
+
+_PHI4_STOP_SEQUENCES = ["\n\nNote:", "\n\nIf you're looking", "Note: As"]
+
+
+def _dedup_paragraphs(text: str) -> str:
+    """Remove consecutive repeated paragraphs from model output.
+
+    Splits on blank lines; if any paragraph appears 2+ times consecutively
+    (case-insensitive, stripped), truncates after the first occurrence.
+    """
+    paragraphs = text.split("\n\n")
+    seen: list[str] = []
+    for para in paragraphs:
+        normalized = para.strip().lower()
+        if normalized and seen and normalized == seen[-1].strip().lower():
+            # Consecutive duplicate detected — stop here.
+            break
+        seen.append(para)
+    return "\n\n".join(seen)
+
+
 def query_edge(query: str, rag_context: str, history: list[dict] | None = None) -> str:
     """Local Ollama — zero cost, zero latency."""
     import ollama
@@ -265,22 +294,25 @@ def query_edge(query: str, rag_context: str, history: list[dict] | None = None) 
     # Vision: contains image description request
     if any(kw in ql for kw in ["image", "photo", "picture", "screenshot", "describe this"]):
         model = ollama_cfg.get("models", {}).get("vision", "llava:7b")
+        system_prompt = _persona_block()
     elif any(kw in ql for kw in ["code", "bug", "function", "class", "error", "fix"]):
         model = ollama_cfg.get("models", {}).get("code", "qwen2.5-coder:7b")
+        system_prompt = _persona_block()
     elif any(kw in ql for kw in ["hello", "hi", "hey", "good", "morning", "weather"]):
         model = ollama_cfg.get("models", {}).get("chat", "phi4-mini")
+        system_prompt = _PHI4_SYSTEM_PROMPT
+        # phi4-mini is casual/greeting only — cap tokens and add stop sequences
+        opts["num_predict"] = min(int(opts.get("num_predict", 512)), 512)
+        opts["stop"] = _PHI4_STOP_SEQUENCES
     else:
         model = ollama_cfg.get("models", {}).get("reasoning", "deepseek-r1:7b")
+        system_prompt = _persona_block()
 
-    prompt = f"""{_persona_block()}
-
-Relevant Context from Memory: {rag_context[:1500]}
-Query: {query}"""
-
-    messages = []
+    messages = [{"role": "system", "content": system_prompt}]
     if history:
-        messages.extend(history[-10:])  # Last 10 turns
-    messages.append({"role": "user", "content": prompt})
+        messages.extend(history[-10:])
+    rag_prefix = f"[Context: {rag_context[:1500]}]\n\n" if rag_context.strip() else ""
+    messages.append({"role": "user", "content": f"{rag_prefix}{query}"})
 
     t0 = time.time()
     with _ollama_lock:
@@ -289,6 +321,9 @@ Query: {query}"""
         )
         resp = client.chat(model=model, messages=messages, options=opts)
     content = resp["message"]["content"]
+    # Post-process: remove consecutive repeated paragraphs (guards against
+    # infinite-loop outputs that repeat the same paragraph 20+ times).
+    content = _dedup_paragraphs(content)
     latency = (time.time() - t0) * 1000
     log_routing_decision(query, BrainTier.EDGE, model, latency)
     return content

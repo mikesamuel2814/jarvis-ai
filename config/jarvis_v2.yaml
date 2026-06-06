@@ -28,6 +28,8 @@ ollama:
     num_keep: 256
     num_predict: 1024
     temperature: 0.3
+    repeat_penalty: 1.15  # Prevent infinite-loop repetition
+    repeat_last_n: 128
   # Semaphore: only 1 model loaded at a time (6GB VRAM)
   max_loaded_models: 1
 

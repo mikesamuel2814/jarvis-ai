@@ -40,6 +40,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 MAX_HISTORY = 30  # messages per user kept on disk
+MAX_RESPONSE_CHARS = 8000  # hard cap — prevents duplicate spam from looping models
 
 # Per-user conversation history — loaded from disk on startup
 _histories: dict[int, deque] = {}
@@ -315,14 +316,26 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
 
     try:
         resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
-        # Retry once on 503 — model may still be loading
+        # Retry once on 503 — model may still be loading.
+        # Only retry if the response body is empty/non-JSON (i.e. server not ready),
+        # NOT if we already got a valid LLM response (avoids sending the same answer twice).
         if resp.status_code == 503:
-            import time
-            time.sleep(8)
-            resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
+            try:
+                resp.json()  # if this succeeds, we already have a response — don't retry
+            except Exception:
+                import time
+                time.sleep(8)
+                resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
         resp.raise_for_status()
         data = resp.json()
         answer = data.get("response", "No response received.")
+        # Hard cap: prevent looping model responses from spamming Telegram with dozens of chunks.
+        if len(answer) > MAX_RESPONSE_CHARS:
+            log.warning(
+                "query_jarvis: response truncated from %d to %d chars (looping model?)",
+                len(answer), MAX_RESPONSE_CHARS,
+            )
+            answer = answer[:MAX_RESPONSE_CHARS] + "\n\n… [truncated — response too long]"
         iid = data.get("interaction_id")
         add_to_history(uid, "user", text)
         add_to_history(uid, "assistant", answer)
@@ -882,6 +895,11 @@ def main():
             converted = text
         else:
             converted = _to_html(text)
+        # Safety cap — ensure no single send call can produce excessive chunks
+        # (e.g. from action outputs or looping model responses that bypass query_jarvis).
+        if len(converted) > MAX_RESPONSE_CHARS:
+            log.warning("send(): text truncated from %d chars", len(converted))
+            converted = converted[:MAX_RESPONSE_CHARS] + "\n\n… [truncated — response too long]"
         parts = split_message(converted)
         for i, part in enumerate(parts):
             kw = {}
@@ -1746,6 +1764,99 @@ def main():
         except Exception as e:
             log.warning("selfcheck_cmd error: %s", e)
             await send(update, "⚠️ Sorry Sir, the self-check could not be completed. Check logs for details.")
+
+    async def probe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Usage: /probe <question> — test local AI directly"""
+        from fmt import esc
+        q = " ".join(context.args) if context.args else "What is your name and purpose?"
+        await send(update, "🔬 Probing local brain…")
+        try:
+            r = requests.post(f"{API_BASE}/probe", json={"prompt": q, "model": "phi4-mini"}, headers=_ah(), timeout=30)
+            d = r.json()
+            txt = (
+                f"<b>🔬 Local Brain Probe</b>\n"
+                f"<b>Model:</b> <code>{d['model']}</code>\n"
+                f"<b>Time:</b> <code>{d['duration_ms']}ms</code>\n\n"
+                f"<b>Q:</b> {esc(q)}\n\n"
+                f"<b>A:</b> {esc(d['response'])}"
+            )
+            await send(update, txt, already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Probe failed: {e}")
+
+    async def skills_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show Jarvis capabilities summary"""
+        from fmt import esc
+        await send(update, "📊 Checking Jarvis skills…")
+        try:
+            r = requests.get(f"{API_BASE}/skills", headers=_ah(), timeout=15)
+            d = r.json()
+            lines = ["<b>🧠 Jarvis Skills & Knowledge</b>\n"]
+            lines.append(f"⚡ <b>Actions:</b> <code>{d.get('actions', '?')}</code>")
+            lines.append(f"💾 <b>Memory chunks:</b> <code>{d.get('memory_chunks', '?')}</code>")
+            lines.append(f"🤖 <b>Models loaded:</b> <code>{', '.join(d.get('models', []))}</code>")
+            if d.get('collections'):
+                lines.append("\n<b>📚 Collections:</b>")
+                for name, cnt in d['collections'].items():
+                    lines.append(f"  · {esc(name)}: <code>{cnt}</code>")
+            await send(update, "\n".join(lines), already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Skills check failed: {e}")
+
+    async def recall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show what Jarvis remembers about Mike"""
+        from fmt import esc
+        topic = " ".join(context.args) if context.args else "Mike Samuel profile preferences projects"
+        await send(update, f"🔍 Recalling: <code>{esc(topic)}</code>…", already_html=True)
+        try:
+            r = requests.post(f"{API_BASE}/recall", json={"topic": topic}, headers=_ah(), timeout=20)
+            d = r.json()
+            chunks = d.get("chunks", [])
+            if not chunks:
+                await send(update, "🤷 Nothing found in memory for that topic. Try /index to re-index.")
+                return
+            lines = [f"<b>🧠 Memory Recall: {esc(topic)}</b>\n"]
+            for i, c in enumerate(chunks[:5], 1):
+                lines.append(f"<b>{i}.</b> {esc(str(c)[:300])}")
+            await send(update, "\n\n".join(lines), already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Recall failed: {e}")
+
+    async def objectives_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show Jarvis main objectives and Mike's profile"""
+        from fmt import esc
+        try:
+            r = requests.get(f"{API_BASE}/objectives", headers=_ah(), timeout=10)
+            d = r.json()
+            lines = ["<b>🎯 Jarvis Objectives & Profile</b>\n"]
+            for section, content in d.items():
+                lines.append(f"<b>{esc(section)}:</b>")
+                if isinstance(content, list):
+                    for item in content:
+                        lines.append(f"  · {esc(str(item))}")
+                else:
+                    lines.append(f"  {esc(str(content))}")
+            await send(update, "\n".join(lines), already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Objectives fetch failed: {e}")
+
+    async def benchmark_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Run a quick 3-model benchmark"""
+        from fmt import esc
+        q = " ".join(context.args) if context.args else "Describe Jarvis in one sentence."
+        await send(update, f"⏱ Benchmarking all models on: <i>{esc(q)}</i>…", already_html=True)
+        models = ["phi4-mini", "qwen2.5-coder:7b", "deepseek-r1:7b"]
+        lines = [f"<b>⏱ Benchmark: {esc(q)}</b>\n"]
+        for model in models:
+            try:
+                r = requests.post(f"{API_BASE}/probe", json={"prompt": q, "model": model}, headers=_ah(), timeout=60)
+                d = r.json()
+                resp = esc(d.get("response", "")[:200])
+                ms = d.get("duration_ms", "?")
+                lines.append(f"<b>🤖 {esc(model)}</b> (<code>{ms}ms</code>)\n{resp}\n")
+            except Exception as e:
+                lines.append(f"<b>🤖 {esc(model)}</b> — ❌ {esc(str(e))}\n")
+        await send(update, "\n".join(lines), already_html=True)
 
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
