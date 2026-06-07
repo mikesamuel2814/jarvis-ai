@@ -65,6 +65,14 @@ class GuardBot(BaseBot):
         })
         if not decision:
             log.warning("Guard BLOCK %s (%s/%s): %s", tool_name, rank, scope.value, reason)
+            # Notify on blocks of privileged/security-critical/destructive actions
+            # (R4+). Routine R2/R3 gating is normal and stays silent.
+            if rank in ("R4", "R5", "R6"):
+                try:
+                    from notifier import get_notifier
+                    get_notifier().blocked(f"{tool_name} ({rank})", reason, "guard")
+                except Exception:  # noqa: BLE001
+                    pass
         return decision, reason
 
     def _decide(self, tool_name, params, rank, scope) -> Tuple[bool, str]:

@@ -216,12 +216,17 @@ class ToolBuilder:
         if not report.passed:
             r.phase = "security"
             r.error = f"{len(report.findings)} security finding(s)"
+            # HIGH: a generated tool was blocked for security reasons.
+            self._notify("failure", f"tool build: {spec['name']}",
+                         f"blocked at security — {r.error}", "tool_builder")
             return r
 
         # Phase 4 — sandboxed test.
         r.test = await self.test(code, spec["name"])
         if not r.test.get("passed"):
             r.phase, r.error = "test", r.test.get("detail", "test failed")
+            self._notify("failure", f"tool build: {spec['name']}",
+                         f"failed validation — {r.error[:120]}", "tool_builder")
             return r
 
         # Phase 5 — deploy.
@@ -229,6 +234,10 @@ class ToolBuilder:
             r.deployed_path = self.deploy(spec["name"], code, spec,
                                           r.security, r.test)
         r.phase, r.success = "deployed", True
+        # MEDIUM: new tool successfully built & deployed by Jarvis.
+        self._notify("success", f"new tool: {spec['name']}",
+                     f"{spec['rank']}/{spec['scope']} via {r.provider or 'synth'} → "
+                     f"{'deployed' if deploy else 'validated'}", "tool_builder")
         return r
 
 

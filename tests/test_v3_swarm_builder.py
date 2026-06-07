@@ -5,9 +5,13 @@ Run: python3 tests/test_v3_swarm_builder.py
 """
 
 import asyncio
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Silence real Telegram notifications during tests.
+os.environ["JARVIS_NOTIFY_DISABLED"] = "1"
 
 sys.path.insert(0, str(Path("/home/kali/.jarvis")))
 
@@ -157,6 +161,23 @@ async def test_callbacks():
     tr.revoke_tool("v3cb_test_tool")  # cleanup
 
 
+def test_notifier():
+    print("[notifier — severity threshold]")
+    from notifier import Notifier, Level
+    # Fresh instance with the kill-switch off so we can test pure logic.
+    os.environ["JARVIS_NOTIFY_DISABLED"] = "0"
+    n = Notifier()
+    check("GENERAL suppressed", n.notify("x", Level.GENERAL, dry_run=True) is False)
+    check("NORMAL suppressed", n.notify("x", Level.NORMAL, dry_run=True) is False)
+    check("MEDIUM delivered", n.notify("ok", Level.MEDIUM, "success", dry_run=True) is True)
+    check("HIGH delivered", n.notify("bad", Level.HIGH, "failure", dry_run=True) is True)
+    check("duplicate suppressed",
+          n.notify("ok", Level.MEDIUM, "success", dry_run=True) is False)
+    os.environ["JARVIS_NOTIFY_DISABLED"] = "1"
+    check("kill-switch suppresses all",
+          n.notify("anything", Level.CRITICAL, dry_run=True) is False)
+
+
 async def main():
     await test_swarm()
     test_remedy()
@@ -164,7 +185,8 @@ async def main():
     await test_builder()
     test_brain_clients()
     await test_callbacks()
-    print("\nALL V3 SWARM/BUILDER/ROUTER/UI TESTS PASSED ✅")
+    test_notifier()
+    print("\nALL V3 SWARM/BUILDER/ROUTER/UI/NOTIFY TESTS PASSED ✅")
 
 
 if __name__ == "__main__":

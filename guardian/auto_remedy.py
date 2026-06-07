@@ -126,6 +126,13 @@ class AutoRemediator:
                 rem.detail = detail[:300]
                 log.warning("Auto-remediated %s via %s -> %s",
                             rem.alert_title, rem.action, "OK" if ok else "FAIL")
+                # Notify Sir: Jarvis took an autonomous remediation action.
+                try:
+                    from notifier import get_notifier
+                    get_notifier().remediation(rem.alert_title, ok,
+                                               f"{rem.action} — {rem.rationale}", "guardian")
+                except Exception:  # noqa: BLE001
+                    pass
             else:
                 rem.detail = f"gated: {reason}"
         else:

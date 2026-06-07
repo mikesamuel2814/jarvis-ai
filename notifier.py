@@ -88,6 +88,11 @@ class Notifier:
                dry_run: bool = False) -> bool:
         """Queue a notification. Returns True if it will be sent (meets the
         threshold and isn't a dedup), False if suppressed."""
+        # Global kill-switch (tests, maintenance): JARVIS_NOTIFY_DISABLED=1.
+        if os.environ.get("JARVIS_NOTIFY_DISABLED") == "1":
+            self._suppressed_count += 1
+            return False
+
         if level < self.threshold:
             self._suppressed_count += 1
             log.debug("Suppressed (%s < %s): %s", level.name, self.threshold.name, message[:60])

@@ -160,6 +160,15 @@ class Orchestrator:
             result.needs_approval = paused_task.tool_name
             result.answer = req["text"]
             result.elapsed_sec = time.time() - t0
+            # HIGH: Jarvis paused an action awaiting Sir's approval.
+            try:
+                from notifier import get_notifier
+                get_notifier().decision(
+                    f"awaiting approval: {paused_task.tool_name}",
+                    str(paused_task.description)[:120],
+                    level=__import__("notifier").Level.HIGH, source="orchestrator")
+            except Exception:  # noqa: BLE001
+                pass
             return result
 
         # Step 5: Nano-Bot Dispatch

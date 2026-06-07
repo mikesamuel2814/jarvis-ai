@@ -256,4 +256,28 @@ ALL TESTS PASSED ✅
 
 ---
 
+### ✅ Phase 9: Unified Notification Service
+**File:** `notifier.py`
+
+Single clean path for Jarvis to push instant Telegram notifications about its
+own decisions — replacing the scattered per-module senders. **Policy: notify on
+MEDIUM and above only** (GENERAL/NORMAL chatter suppressed):
+
+| Level | Sent | Example |
+|-------|------|---------|
+| GENERAL / NORMAL | no | routine reads, ordinary command done |
+| MEDIUM | yes | tool/build success, **new bot request**, auto-action |
+| HIGH | yes | failure, blocked privileged (R4+) action, remediation, awaiting approval |
+| CRITICAL | yes | production down, security event |
+
+Config: `secrets.env` (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_USER_ID`). Non-blocking
+(daemon thread), dedup window, `JARVIS_NOTIFY_DISABLED=1` kill-switch for tests.
+
+**Wired decision points:** tool builder (new bot request / build success /
+security-or-test failure), guardian auto-remediation (applied/attempted), Guard
+bot (blocked R4+ actions), orchestrator (awaiting approval). Verified end-to-end
+with a live Telegram delivery.
+
+---
+
 *"Jarvis is the brain. Kimi is every neuron."*
