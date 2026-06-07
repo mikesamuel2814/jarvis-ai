@@ -57,16 +57,30 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
+def _classify_level(msg: str):
+    """Infer notification level from a monitor alert's emoji/keywords so info
+    chatter (restarts, recoveries) stays under the MEDIUM send threshold."""
+    from notifier import Level
+    m = msg.lower()
+    if "🚨" in msg or any(k in m for k in ("critical", "is down", "failed", "stopped", "offline")):
+        return Level.CRITICAL
+    if "⚠️" in msg or any(k in m for k in ("high", "full", "warning", "brute")):
+        return Level.HIGH
+    # ℹ️ info: restarts, recoveries, "back up" — operational but not actionable.
+    return Level.NORMAL
+
+
 def send_telegram(msg: str, cfg: dict):
     """Send a monitor alert via the unified v3 notifier (secrets.env config).
 
     The old config/telegram.json path was removed in Milestone 0 (SEC-02), so
-    this now routes through notifier.py. Monitor alerts are operational HIGH
-    events and bypass the GENERAL/NORMAL suppression.
+    this now routes through notifier.py. Severity is inferred from the message
+    so info-level events (e.g. service restarts) don't spam — only MEDIUM+
+    (warnings/criticals) are delivered, per the notify policy.
     """
     try:
-        from notifier import get_notifier, Level
-        get_notifier().notify(msg, Level.HIGH, kind="decision", source="monitor")
+        from notifier import get_notifier
+        get_notifier().notify(msg, _classify_level(msg), kind="decision", source="monitor")
     except Exception as e:
         log(f"Telegram send failed: {e}")
 
