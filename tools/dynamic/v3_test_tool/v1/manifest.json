@@ -1,0 +1,11 @@
+{
+  "name": "v3_test_tool",
+  "rank": "R0",
+  "scope": "READ",
+  "version": 1,
+  "created": 1780818214.3999782,
+  "test": {
+    "passed": true,
+    "detail": "syntax+compile+import OK"
+  }
+}
