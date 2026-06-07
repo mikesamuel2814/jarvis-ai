@@ -574,9 +574,23 @@ except Exception as _exc:  # noqa: BLE001
     log.error("Could not graft legacy v2 routes: %s", _exc)
 
 
+# ── Warm-up (Python 3.13 segfault guard) ────────────────────────────
+# Pre-load heavy C-extension modules in the main thread before uvicorn
+# starts background workers. Without this, lazy imports inside async
+# request handlers trigger the Python 3.13 eval-frame cache crash.
+def _warmup():
+    try:
+        import jarvis_agent_v3  # noqa: F401
+        get_tool_registry()
+        log.info("Warm-up complete: heavy modules loaded in main thread")
+    except Exception as exc:
+        log.warning("Warm-up incomplete (non-fatal): %s", exc)
+
+
 # ── Main ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    _warmup()
     import uvicorn
     log.info("Starting Jarvis v3 API on %s:%d", API_HOST, API_PORT)
     uvicorn.run(app, host=API_HOST, port=API_PORT)
