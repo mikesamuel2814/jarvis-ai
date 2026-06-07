@@ -117,9 +117,9 @@ async def run_agent_v3(
             "steps": [
                 {"action": s.get("tool", s.get("task", "?")),
                  "output_preview": str(s.get("result", {}).get("output", ""))[:300]}
-                for s in result.steps
+                for s in result.steps if s.get("tool")
             ],
-            "actions_run": [s.get("tool", s.get("task", "?")) for s in result.steps],
+            "actions_run": [s.get("tool", s.get("task", "?")) for s in result.steps if s.get("tool")],
             "needs_approval": result.needs_approval,
             "permission_request_id": result.permission_request_id,
             "permission_keyboard": result.permission_keyboard,
@@ -132,7 +132,7 @@ async def run_agent_v3(
     if not answer or len(answer) < 20:
         answer = await _synthesize_v3(task, result.steps, thinking_ctx, tier_name)
 
-    actions_run = [s.get("tool", s.get("task", "?")) for s in result.steps]
+    actions_run = [s.get("tool", s.get("task", "?")) for s in result.steps if s.get("tool")]
     _log_run(task, result.steps, answer, None, tier_name)
 
     return {
@@ -140,7 +140,7 @@ async def run_agent_v3(
         "steps": [
             {"action": s.get("tool", s.get("task", "?")),
              "output_preview": str(s.get("result", {}).get("output", ""))[:300]}
-            for s in result.steps
+            for s in result.steps if s.get("tool")
         ],
         "actions_run": actions_run,
         "needs_approval": None,
