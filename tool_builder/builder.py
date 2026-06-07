@@ -41,7 +41,10 @@ class BuildResult:
 class ToolBuilder:
     def __init__(self, generator: Optional[Any] = None,
                  blackboard=None, gossip=None):
-        # generator: callable(prompt, system) -> str  (KimiClient.complete)
+        # generator: optional callable(prompt, system) -> str. When None, the
+        # Builder bot uses the provider-agnostic CodeGenerator (Kimi → local
+        # Ollama code models → Jarvis's own shell/template synthesis), so tool
+        # building never hard-depends on the Moonshot API key.
         self._generator = generator
         self.security_bot = SecurityBot()
         self.blackboard = blackboard

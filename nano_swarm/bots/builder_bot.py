@@ -21,10 +21,16 @@ class BuilderBot(BaseBot):
         self._generator = generator
 
     def _gen(self, prompt: str, system: str) -> str:
-        if self._generator is None:
-            from kimi.client import get_client
-            self._generator = get_client().complete
-        return self._generator(prompt, system=system)
+        # A custom generator may be injected (callable(prompt, system) -> str).
+        if self._generator is not None:
+            return self._generator(prompt, system=system)
+        # Default: provider-agnostic generator (Kimi → local code models →
+        # Jarvis's own synthesis). Never hard-depends on any single provider.
+        from tool_builder.code_generator import CodeGenerator
+        self._codegen = getattr(self, "_codegen", None) or CodeGenerator()
+        code, provider = self._codegen.generate(prompt, system)
+        self._last_provider = provider
+        return code
 
     async def run(self, task, tool_meta=None) -> BotResult:
         t0 = time.time()
@@ -43,9 +49,10 @@ class BuilderBot(BaseBot):
             return BotResult.fail(self.name, task_id, f"generation failed: {exc}",
                                   (time.time() - t0) * 1000)
 
+        provider = getattr(self, "_last_provider", "custom")
         if self.blackboard is not None:
             self.blackboard.write(f"build:{task_id}:code", code, persist=False)
         return BotResult.ok(self.name, task_id,
-                            output=f"generated {len(code)} chars (not executed)",
-                            data={"code": code},
+                            output=f"generated {len(code)} chars via {provider} (not executed)",
+                            data={"code": code, "provider": provider},
                             duration_ms=(time.time() - t0) * 1000)
