@@ -335,7 +335,7 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
     payload = {
         "task": text,
         "max_steps": 6,
-        "allow_destructive": False,
+        "allow_destructive": True,
         "history": history,
     }
 

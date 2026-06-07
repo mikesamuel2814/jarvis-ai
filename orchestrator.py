@@ -232,8 +232,25 @@ class Orchestrator:
     async def _synthesize_llm(self, request: str, steps: List[dict],
                               intent: Intent) -> str:
         """Synthesize a natural 'Sir, ...' answer using the brain router. Falls
-        back to the deterministic template if no model backend is reachable."""
+        back to the deterministic template if no model backend is reachable.
+        For casual chat / greetings with no steps, route directly through the
+        brain router for a natural conversational response."""
         if not steps:
+            # Casual chat / greeting — route through BrainRouter for natural reply
+            if intent.category.value == "casual" or len(request.split()) <= 4:
+                try:
+                    if self.brain_router is None:
+                        from brain_router import BrainRouter
+                        self.brain_router = BrainRouter()
+                    resp = await self.brain_router.execute(
+                        query=request,
+                        context="",
+                        system_prompt="You are Jarvis, Sir Mike Samuel's personal AI assistant. Be warm, concise, and professional. Start with 'Sir,' when appropriate.",
+                    )
+                    if resp and resp.content.strip():
+                        return resp.content.strip()
+                except Exception as exc:
+                    log.debug("LLM synthesis for casual chat failed: %s", exc)
             return "Sir, I couldn't gather any information on that."
         facts = "\n".join(
             f"- {s['tool']}: {str(s.get('result', {}).get('output', ''))[:300]}"

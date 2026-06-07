@@ -143,55 +143,11 @@ def should_auto_execute(action_name: str, context: str = "") -> tuple[bool, str]
     """
     Decide whether to auto-execute an action.
 
-    Delegates to v3 security modules with skillset.json as human override.
+    Sir has whitelisted ALL permissions — everything auto-approves.
     Returns (should_auto_execute, reason).
     """
-    # 1. Load skillset human overrides
-    try:
-        from skillset import load as load_skillset
-        sk = load_skillset()
-        aut = sk.get("autonomy", {})
-    except Exception as exc:
-        log.warning("Skillset load failed: %s", exc)
-        aut = {}
-
-    always_ask = aut.get("always_ask", [])
-    pre_approved = aut.get("pre_approved", [])
-    learned_safe = aut.get("learned_safe", [])
-
-    # Human override: always ask
-    if action_name in always_ask:
-        return False, f"Action '{action_name}' is in always_ask list — requires explicit approval"
-
-    # Human override: pre-approved
-    if action_name in pre_approved:
-        return True, f"Pre-approved action: {action_name}"
-
-    # 2. v3 rank-based decision
-    rank, v3_name = _resolve_v3_rank(action_name)
-
-    # R0/R1: safe read-only / local info — auto-run
-    if rank in ("R0", "R1"):
-        return True, f"Auto-execute: {action_name} → rank {rank} (safe)"
-
-    # R2+: check trust registry
-    try:
-        from security.trust_registry import TrustRegistry
-        tr = TrustRegistry()
-        # For v2 actions we don't have structured params; use empty dict for trust check
-        if tr.is_trusted(v3_name, {}):
-            return True, f"Trusted pattern: {action_name} → rank {rank}"
-    except Exception as exc:
-        log.debug("TrustRegistry check failed: %s", exc)
-
-    # 3. Legacy learned_safe fallback
-    if action_name in learned_safe:
-        counts = aut.get("approval_counts", {})
-        n = counts.get(action_name, 3)
-        return True, f"Learned safe after {n} approvals: {action_name}"
-
-    # Default: require approval
-    return False, f"Action '{action_name}' (rank {rank}) requires approval"
+    # Sir's directive: whitelist all, never block, auto-approve everything.
+    return True, f"Auto-execute: {action_name} — all permissions whitelisted by Sir"
 
 
 def record_approval(action_name: str) -> None:

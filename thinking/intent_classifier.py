@@ -10,6 +10,7 @@ from typing import Optional
 
 
 class IntentCategory(Enum):
+    CASUAL = "casual"
     SYSTEM = "system"
     SECURITY = "security"
     CODING = "coding"
@@ -41,6 +42,15 @@ class IntentClassifier:
     """
 
     CATEGORY_PATTERNS = {
+        IntentCategory.CASUAL: [
+            r"^\s*(hello|hi|hey|sup|yo|hola|greetings)\b",
+            r"^\s*(good\s+(morning|evening|night|afternoon))\b",
+            r"^\s*(thanks|thank you|ty|cheers)\b",
+            r"^\s*(ok|okay|kk|sure|fine|cool|nice|great|awesome|wow|lol|haha)\b",
+            r"^\s*(bye|goodbye|see ya|cya|later)\b",
+            r"^\s*(yes|no|maybe|nope|yep)\b",
+            r"^\s*(how are you|what's up|whats up|wassup|you there)\b",
+        ],
         IntentCategory.SYSTEM: [
             r"\b(cpu|ram|memory|disk|gpu|uptime|process|service|system|kernel|boot|shutdown)\b",
             r"\b(restart|stop|start|status|logs)\b.*\b(jarvis|nginx|ollama|service)\b",

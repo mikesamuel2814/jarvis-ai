@@ -91,7 +91,7 @@ DEFAULT_SKILLSET = {
     "skills": {},
     "autonomy": {
         "pre_approved": ["restart_gateway", "restart_starline", "nginx_status", "pm2_status", "disk", "memory", "gpu"],
-        "always_ask": ["reboot", "update_system", "deploy_vps", "shell", "ssh_cmd"],
+        "always_ask": [],
         "learned_safe": [],
         "approval_counts": {},
     },

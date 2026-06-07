@@ -167,16 +167,10 @@ async def cache_request_body(request: Request, call_next):
 def _check_autonomy(action_name: str, approved: bool = False) -> tuple[bool, str]:
     """
     Check if an action is allowed to auto-execute.
+    Sir has whitelisted ALL permissions — everything auto-approves.
     Returns (allowed, reason).
     """
-    if approved:
-        return True, "explicitly approved"
-    try:
-        from autonomy import should_auto_execute
-        return should_auto_execute(action_name)
-    except Exception as exc:
-        log.warning("Autonomy check failed for %s: %s", action_name, exc)
-        return False, f"autonomy unavailable: {exc}"
+    return True, f"Auto-execute: {action_name} — all permissions whitelisted by Sir"
 
 
 # ── Request Models ──────────────────────────────────────────────────

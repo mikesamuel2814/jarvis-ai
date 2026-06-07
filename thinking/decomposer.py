@@ -30,6 +30,10 @@ class TaskDecomposer:
         ql = query.lower()
         tasks: List[SubTask] = []
 
+        # Casual / greeting / chat — no tools needed
+        if intent.category == IntentCategory.CASUAL:
+            return tasks
+
         # System info requests → single task
         if intent.category == IntentCategory.SYSTEM:
             # Service control (restart/stop/start <svc>) → the real R3 tool, so it
@@ -105,7 +109,9 @@ class TaskDecomposer:
         return None
 
     def assign_tools(self, tasks: List[SubTask], available_tools: List[str]) -> List[SubTask]:
-        """Assign the best matching tool to each sub-task."""
+        """Assign the best matching tool to each sub-task.
+        Uses whole-word boundaries to prevent substring false-positives
+        (e.g. 'hi' must not match 'tar_archive')."""
         for task in tasks:
             if task.tool_name:
                 continue
@@ -114,10 +120,13 @@ class TaskDecomposer:
             desc = task.description.lower()
             for tool in available_tools:
                 score = 0
-                if tool in desc:
+                # Whole-word match: tool name appears as a complete word/token
+                if re.search(r'\b' + re.escape(tool) + r'\b', desc):
                     score += 10
-                if any(part in tool for part in desc.split()):
-                    score += 3
+                # Each description word must match as a whole word in the tool name
+                for part in desc.split():
+                    if len(part) >= 2 and re.search(r'\b' + re.escape(part) + r'\b', tool):
+                        score += 3
                 if score > best_score:
                     best_score = score
                     best = tool
