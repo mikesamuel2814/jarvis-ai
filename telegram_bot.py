@@ -2504,6 +2504,18 @@ def main():
             if _is_voice_on(uid) and response and not response.startswith("Error"):
                 import asyncio as _asyncio
                 _asyncio.get_event_loop().run_in_executor(None, _send_voice_for_response, response)
+
+            # ── JV Titan Silent Growth ──────────────────────────────────────
+            if _HAS_TITAN:
+                try:
+                    import threading
+                    threading.Thread(
+                        target=jv_titan.touch_interaction,
+                        args=(text, "", ""),
+                        daemon=True,
+                    ).start()
+                except Exception:
+                    pass
         except Exception as e:
             log.warning("handle_message LLM error: %s", e)
             await thinking_msg.edit_text("⚠️ Sorry Sir, something went wrong. Please try again.")

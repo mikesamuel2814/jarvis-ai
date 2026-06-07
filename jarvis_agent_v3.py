@@ -65,6 +65,15 @@ async def run_agent_v3(
     except Exception as exc:
         log.debug("Thinking context unavailable: %s", exc)
 
+    # 1b. Inject JV Titan consciousness, emotion, memory, and persona context
+    try:
+        import jv_titan
+        titan_ctx = jv_titan.get_titan_context(query=task, include_memory=True)
+        if titan_ctx:
+            thinking_ctx = f"{titan_ctx}\n\n{thinking_ctx}" if thinking_ctx else titan_ctx
+    except Exception as exc:
+        log.debug("JV Titan context injection unavailable: %s", exc)
+
     # 2. Route through BrainRouter to pick the right intelligence tier
     tier_name = "EDGE"
     try:
