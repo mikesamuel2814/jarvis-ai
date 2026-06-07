@@ -2114,8 +2114,22 @@ def main():
             footer = ""
             if actions:
                 footer += f"\n\n_Ran: {', '.join(actions)} · {elapsed}s_"
+
+            # v3 permission flow: use the permission keyboard from the agent
+            perm_kb = d.get("permission_keyboard")
+            if needs and perm_kb:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"])
+                     for btn in row]
+                    for row in perm_kb
+                ])
+                await thinking_msg.delete()
+                await send(update, answer + footer, already_html=True, reply_markup=keyboard)
+                return
+
             if needs:
-                # Create the approval request so Mike can tap to authorize
+                # Legacy fallback: create approval request via /action
                 try:
                     ar = requests.post(
                         f"{API_BASE}/action",
