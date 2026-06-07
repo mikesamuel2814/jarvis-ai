@@ -2549,6 +2549,12 @@ def main():
     app_bot.add_handler(CommandHandler("think",      think_cmd))
     app_bot.add_handler(CommandHandler("do",         do_cmd))
     app_bot.add_handler(CommandHandler("benchmark",  benchmark_cmd))
+    # JV Titan commands
+    app_bot.add_handler(CommandHandler("train",     train_cmd))
+    app_bot.add_handler(CommandHandler("titan",     titan_cmd))
+    app_bot.add_handler(CommandHandler("memory",    memory_cmd))
+    app_bot.add_handler(CommandHandler("evolve",    evolve_cmd))
+    app_bot.add_handler(CommandHandler("blueprint", blueprint_cmd))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -2585,6 +2591,11 @@ def main():
         BotCommand("recall",     "What Jarvis remembers about you"),
         BotCommand("objectives", "Jarvis main goals and your profile"),
         BotCommand("benchmark",  "Benchmark all 3 local AI models"),
+        BotCommand("train",      "Train JV Titan with your life story"),
+        BotCommand("titan",      "JV Titan consciousness & growth status"),
+        BotCommand("memory",     "Query JV Titan memory tape"),
+        BotCommand("evolve",     "Trigger JV Titan evolution"),
+        BotCommand("blueprint",  "Export JV Titan binary blueprint"),
     ]
 
     async def _post_init(application):
