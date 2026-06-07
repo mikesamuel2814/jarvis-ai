@@ -241,7 +241,7 @@ def _test():
     assert result["needs_approval"] is None
 
     print("Test 2: Destructive task pauses for approval (untrusted)...")
-    result = asyncio.run(run_agent_v3("reboot the machine", allow_destructive=True))
+    result = asyncio.run(run_agent_v3("restart sshd service", allow_destructive=True))
     print(f"  Needs approval: {result['needs_approval']}")
     print(f"  Has permission keyboard: {bool(result.get('permission_keyboard'))}")
     assert result["needs_approval"] is not None
