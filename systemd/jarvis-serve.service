@@ -1,0 +1,21 @@
+[Unit]
+Description=JARVIS Model Server (venv-jarvis)
+After=network.target nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=simple
+User=kali
+Group=kali
+WorkingDirectory=/home/kali/.jarvis
+Environment="PATH=/home/kali/.jarvis/venv-jarvis/bin"
+Environment="CUDA_VISIBLE_DEVICES=0"
+Environment="JARVIS_MODE=local"
+ExecStart=/home/kali/.jarvis/venv-jarvis/bin/python /home/kali/.jarvis/scripts/serve.py --model /home/kali/.jarvis/models/final/jarvis-dpo
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/jarvis/jarvis-serve.log
+StandardError=append:/var/log/jarvis/jarvis-serve-error.log
+
+[Install]
+WantedBy=multi-user.target
