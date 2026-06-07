@@ -58,21 +58,15 @@ def save_state(state: dict):
 
 
 def send_telegram(msg: str, cfg: dict):
-    """Send directly via Telegram Bot API using stored chat_id — never calls getUpdates."""
+    """Send a monitor alert via the unified v3 notifier (secrets.env config).
+
+    The old config/telegram.json path was removed in Milestone 0 (SEC-02), so
+    this now routes through notifier.py. Monitor alerts are operational HIGH
+    events and bypass the GENERAL/NORMAL suppression.
+    """
     try:
-        token_file = JARVIS_HOME / "config" / "telegram.json"
-        chat_id_file = JARVIS_HOME / "data" / "telegram_chat_id.json"
-        if not token_file.exists() or not chat_id_file.exists():
-            return
-        token = json.loads(token_file.read_text()).get("bot_token", "")
-        chat_id = json.loads(chat_id_file.read_text()).get("chat_id", "")
-        if not token or not chat_id or token == "YOUR_BOT_TOKEN_HERE":
-            return
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-            timeout=10,
-        )
+        from notifier import get_notifier, Level
+        get_notifier().notify(msg, Level.HIGH, kind="decision", source="monitor")
     except Exception as e:
         log(f"Telegram send failed: {e}")
 

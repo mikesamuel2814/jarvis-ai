@@ -69,19 +69,14 @@ def record_heal(action: str, result: str, success: bool):
 
 
 def send_telegram(text: str):
-    """Send alert directly via Telegram Bot API — bypasses Jarvis API."""
+    """Send a healer alert via the unified v3 notifier (secrets.env config).
+
+    Replaces the removed config/telegram.json path (SEC-02). Self-healing events
+    are operational HIGH notifications.
+    """
     try:
-        cfg_path = JARVIS_HOME / "config" / "telegram.json"
-        token = json.loads(cfg_path.read_text()).get("bot_token", "")
-        chat_id_path = JARVIS_HOME / "data" / "telegram_chat_id.json"
-        chat_id = json.loads(chat_id_path.read_text()).get("chat_id", "")
-        if not token or not chat_id:
-            return
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
+        from notifier import get_notifier, Level
+        get_notifier().notify(text, Level.HIGH, kind="remediation", source="healer")
     except Exception as e:
         log(f"Telegram send failed: {e}")
 

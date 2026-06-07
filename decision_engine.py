@@ -91,20 +91,22 @@ def _log_decision(situation: str, decision: str, auto_acted: bool):
 
 
 def _get_telegram_creds() -> tuple[str, int | None]:
-    token_file = JARVIS_HOME / "config" / "telegram.json"
-    chat_id_file = JARVIS_HOME / "data" / "telegram_chat_id.json"
-    token = ""
-    chat_id = None
+    """Read bot token + chat id from secrets.env (the v3 single source of truth;
+    the old config/telegram.json was removed in Milestone 0 / SEC-02)."""
+    secrets = JARVIS_HOME / "config" / "secrets.env"
+    token, chat_id = "", None
     try:
-        token = json.loads(token_file.read_text()).get("bot_token", "")
-        if token == "YOUR_BOT_TOKEN_HERE":
-            token = ""
+        for line in secrets.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("TELEGRAM_BOT_TOKEN="):
+                token = line.split("=", 1)[1].strip().strip('"').strip("'")
+            elif line.startswith("TELEGRAM_USER_ID="):
+                raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                chat_id = int(raw) if raw.isdigit() else raw or None
     except Exception:
         pass
-    try:
-        chat_id = json.loads(chat_id_file.read_text()).get("chat_id")
-    except Exception:
-        pass
+    if token == "YOUR_BOT_TOKEN_HERE":
+        token = ""
     return token, chat_id
 
 
