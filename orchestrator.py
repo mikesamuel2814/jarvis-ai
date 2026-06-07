@@ -217,11 +217,12 @@ class Orchestrator:
             else:
                 result.tasks_completed += 1
                 self.blackboard.write(f"task:{st.id}:result", res)
-                result.steps.append({
-                    "task": st.id,
-                    "tool": st.tool_name,
-                    "result": res,
-                })
+                if st.tool_name:
+                    result.steps.append({
+                        "task": st.id,
+                        "tool": st.tool_name,
+                        "result": res,
+                    })
 
         # Step 6: Result Synthesis (LLM-backed, template fallback)
         result.answer = await self._synthesize_llm(request, result.steps, intent)
