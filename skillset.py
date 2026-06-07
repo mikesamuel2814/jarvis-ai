@@ -31,6 +31,59 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# ── Semantic Rule Retrieval (ChromaDB) ──────────────────────────────
+_RULES_COLLECTION = None
+
+
+def _rules_collection():
+    """Lazy-init ChromaDB collection for learned rules."""
+    global _RULES_COLLECTION
+    if _RULES_COLLECTION is None:
+        try:
+            import chromadb
+            client = chromadb.PersistentClient(path=str(JARVIS_HOME / "memory"))
+            _RULES_COLLECTION = client.get_or_create_collection("jarvis_rules")
+            log.debug("ChromaDB rules collection ready")
+        except Exception as exc:
+            log.warning("ChromaDB rules collection unavailable: %s", exc)
+            _RULES_COLLECTION = False  # negative cache
+    return _RULES_COLLECTION if _RULES_COLLECTION is not False else None
+
+
+def _ensure_rules_indexed() -> int:
+    """One-time migration: index existing JSON rules into ChromaDB."""
+    col = _rules_collection()
+    if col is None:
+        return 0
+    try:
+        existing = col.get()
+        if existing and len(existing["ids"]) > 0:
+            return 0  # already indexed
+    except Exception:
+        pass
+    sk = load()
+    rules = sk.get("rules", [])
+    if not rules:
+        return 0
+    indexed = 0
+    for r in rules:
+        try:
+            col.add(
+                ids=[r["id"]],
+                documents=[r["rule"]],
+                metadatas=[{
+                    "priority": r.get("priority", 5),
+                    "hits": r.get("hits", 1),
+                    "source": r.get("source", "unknown"),
+                }],
+            )
+            indexed += 1
+        except Exception as exc:
+            log.debug("Failed to index rule %s: %s", r.get("id"), exc)
+    if indexed:
+        log.info("Indexed %d existing rules into ChromaDB", indexed)
+    return indexed
+
 
 DEFAULT_SKILLSET = {
     "version": 1,
@@ -120,6 +173,23 @@ def add_rule(rule_text: str, priority: int = 5, source: str = "unknown") -> bool
     sk["rules"].append(new_rule)
     sk["metadata"]["total_rules_learned"] += 1
     save(sk)
+
+    # Semantic index: insert into ChromaDB for embedding-based retrieval
+    col = _rules_collection()
+    if col is not None:
+        try:
+            col.add(
+                ids=[new_rule["id"]],
+                documents=[new_rule["rule"]],
+                metadatas=[{
+                    "priority": new_rule["priority"],
+                    "hits": new_rule["hits"],
+                    "source": new_rule["source"],
+                }],
+            )
+        except Exception as exc:
+            log.debug("Failed to index rule in ChromaDB: %s", exc)
+
     log.info(f"Rule added (priority {priority}): {rule_text[:60]}")
     return True
 
@@ -127,7 +197,8 @@ def add_rule(rule_text: str, priority: int = 5, source: str = "unknown") -> bool
 def get_prompt_injection(query: str = "", n: int = 5) -> str:
     """
     Return top-N rules formatted for system prompt injection.
-    If query provided, ranks rules by semantic relevance.
+    Uses semantic search (ChromaDB embeddings) when available,
+    falling back to keyword + priority ranking.
     """
     sk = load()
     rules = sk.get("rules", [])
@@ -135,20 +206,57 @@ def get_prompt_injection(query: str = "", n: int = 5) -> str:
     if not rules:
         return ""
 
-    # Simple keyword matching if query provided
+    top_rules = []
+
+    # 1. Semantic retrieval via ChromaDB (embedding similarity)
     if query:
-        query_words = set(query.lower().split())
-        scored = []
-        for i, r in enumerate(rules):
-            rule_words = set(r["rule"].lower().split())
-            overlap = len(query_words & rule_words)
-            score = (overlap * 2) + (r["priority"] / 10.0) + (r["hits"] / 100.0)
-            scored.append((score, i, r))  # i breaks ties without comparing dicts
-        scored.sort(key=lambda x: (-x[0], x[1]))
-        top_rules = [r for _, _, r in scored[:n]]
-    else:
-        # No query: return highest-priority rules
-        top_rules = sorted(rules, key=lambda r: (-r["priority"], -r["hits"]))[:n]
+        col = _rules_collection()
+        if col is not None:
+            try:
+                _ensure_rules_indexed()
+                results = col.query(
+                    query_texts=[query],
+                    n_results=min(n, len(rules)),
+                    include=["documents", "metadatas", "distances"],
+                )
+                docs = results.get("documents", [[]])[0]
+                metas = results.get("metadatas", [[]])[0]
+                dists = results.get("distances", [[]])[0]
+                # Build rule dicts from ChromaDB results, augment with distance score
+                for doc, meta, dist in zip(docs, metas, dists):
+                    # Find the original rule to get its hits/ts/id
+                    matched = next((r for r in rules if r["rule"] == doc), None)
+                    if matched:
+                        # Boost score: semantic similarity (inverse distance) +
+                        # priority weight + hit weight
+                        semantic_score = max(0.0, 1.0 - dist) if dist is not None else 0.5
+                        priority_bonus = meta.get("priority", 5) / 10.0
+                        hit_bonus = matched.get("hits", 1) / 100.0
+                        matched = dict(matched)  # copy so we don't mutate original
+                        matched["_score"] = semantic_score + priority_bonus + hit_bonus
+                        top_rules.append(matched)
+                # Sort by composite score
+                top_rules.sort(key=lambda r: -r["_score"])
+                top_rules = top_rules[:n]
+                log.debug("Semantic rule retrieval: %d rules for query '%s...'", len(top_rules), query[:40])
+            except Exception as exc:
+                log.debug("Semantic retrieval failed, falling back to keyword: %s", exc)
+                top_rules = []
+
+    # 2. Keyword + priority fallback (if semantic returned nothing or no query)
+    if not top_rules:
+        if query:
+            query_words = set(query.lower().split())
+            scored = []
+            for i, r in enumerate(rules):
+                rule_words = set(r["rule"].lower().split())
+                overlap = len(query_words & rule_words)
+                score = (overlap * 2) + (r["priority"] / 10.0) + (r["hits"] / 100.0)
+                scored.append((score, i, r))
+            scored.sort(key=lambda x: (-x[0], x[1]))
+            top_rules = [r for _, _, r in scored[:n]]
+        else:
+            top_rules = sorted(rules, key=lambda r: (-r["priority"], -r["hits"]))[:n]
 
     if not top_rules:
         return ""
