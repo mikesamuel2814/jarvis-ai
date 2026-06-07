@@ -65,13 +65,24 @@ else
     pip install -r "$JARVIS_DIR/requirements-cloud.txt"
 fi
 
-# 4. Model download
-echo "Downloading base model..."
-if [ ! -d "$JARVIS_DIR/models/base/deepseek-r1-qwen-7b" ]; then
-    huggingface-cli download deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
-        --local-dir "$JARVIS_DIR/models/base/deepseek-r1-qwen-7b" \
-        --local-dir-use-symlinks False
-fi
+# 4. Model download (Ollama)
+echo "Pulling Ollama models..."
+for model in qwen2.5:7b mistral:7b qwen2.5-coder:7b deepseek-r1:7b; do
+    if ! ollama list | grep -q "^$model\\b"; then
+        echo "Pulling $model..."
+        ollama pull $model
+    else
+        echo "$model already present"
+    fi
+done
+
+# Optional: HuggingFace base model for training
+# echo "Downloading HF base model for training..."
+# if [ ! -d "$JARVIS_DIR/models/base/deepseek-r1-qwen-7b" ]; then
+#     huggingface-cli download deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
+#         --local-dir "$JARVIS_DIR/models/base/deepseek-r1-qwen-7b" \
+#         --local-dir-use-symlinks False
+# fi
 
 # 5. Data directories
 mkdir -p "$JARVIS_DIR/data"/{raw,synthetic,processed,configs}
