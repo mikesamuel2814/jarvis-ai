@@ -64,7 +64,7 @@ v2 run_action(disk): PASS
 ```
 
 ### ✅ Phase 3: Nano-Bot Swarm (Milestone 3)
-**Files:** `nano_swarm/` directory (5 files)
+**Files:** `nano_swarm/` directory (5 files) + `nano_swarm/bots/` (9 files)
 
 | Component | Status |
 |-----------|--------|
@@ -72,6 +72,12 @@ v2 run_action(disk): PASS
 | WorkerPool (50 coroutines) | ✅ |
 | Blackboard (thread-safe + persistence) | ✅ |
 | GossipBus (pub/sub) | ✅ |
+| 7 bot types (Scanner/Verifier/Fetcher/Analyzer/Builder/Test/Guard) | ✅ |
+| Guard Bot security gatekeeper (scope+rank+trust, audit trail) | ✅ |
+| BotDispatcher (role routing) | ✅ |
+
+**Guard gate test:** R0 `os_info` runs via Scanner; R3/LOCAL `service_restart`
+blocked ("scope LOCAL exceeds session READ") with audit entry.
 
 ### ✅ Phase 4: Master Orchestrator (Milestone 4)
 **Files:** `orchestrator.py`, `thinking/intent_classifier.py`, `thinking/decomposer.py`
@@ -109,7 +115,7 @@ v2 run_action(disk): PASS
 | Renderer with auto-classification | ✅ |
 
 ### ✅ Phase 6: Proactive Guardian (Milestone 7)
-**Files:** `guardian/monitor.py`, `guardian/classifier.py`, `guardian/alerter.py`
+**Files:** `guardian/monitor.py`, `guardian/classifier.py`, `guardian/alerter.py`, `guardian/auto_remedy.py`
 
 | Component | Status |
 |-----------|--------|
@@ -117,6 +123,25 @@ v2 run_action(disk): PASS
 | 7-severity classification | ✅ |
 | Rate-limited alerter | ✅ |
 | Deduplication | ✅ |
+| Auto-remediation engine (autonomy-gated) | ✅ |
+
+**Remediation safety:** only P0/P1 with known-safe actions auto-run, and only
+if `autonomy.should_auto_execute` approves; security events are investigate-only.
+
+### ✅ Phase 8: Dynamic Tool Builder (Milestone 5)
+**Files:** `tool_builder/security_bot.py`, `tool_builder/builder.py`
+
+| Component | Status |
+|-----------|--------|
+| Phase 1 requirement analysis (rank/scope inference) | ✅ |
+| Phase 2 code generation (Builder bot → Kimi K2.6) | ✅ |
+| Phase 3 security review (secrets/injection/path-traversal) | ✅ |
+| Phase 4 sandboxed test (Test bot compile) | ✅ |
+| Phase 5 versioned deploy → `tools/dynamic/<name>/vN/` | ✅ |
+| Auto-load of deployed tools into registry | ✅ |
+
+**Pipeline test:** valid tool builds → deploys → registers (registry 127→128) →
+executes; malicious tool (hardcoded secret + `os.system`) blocked at security phase.
 
 ### ✅ Phase 7: API v3 Server
 **File:** `api_v3.py`
