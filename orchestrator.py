@@ -120,6 +120,12 @@ class Orchestrator:
             "data": res.data, "error": res.error, "duration_ms": res.duration_ms,
         }
 
+    async def _execute_approved(self, tool_name: str, params: dict) -> dict:
+        """Run a tool that Sir has explicitly approved via Telegram. Approval
+        grants execution, so this bypasses the Guard's trust gate but still runs
+        through the registry."""
+        return await self._raw_execute_tool(tool_name, params)
+
     async def run(self, request: str, allow_destructive: bool = False) -> OrchestratorResult:
         """Run the full orchestration pipeline."""
         t0 = time.time()
@@ -167,7 +173,18 @@ class Orchestrator:
                 command_display=str(paused_task.description),
                 rank=meta.get("rank", "R2") if meta else "R2",
             )
+            # Register the pending permission so a Telegram button press (which
+            # arrives in a different process, via the API) can resolve it.
+            rank = meta.get("rank", "R2") if meta else "R2"
+            pending = self.permission_handler.register(
+                tool_name=paused_task.tool_name or "",
+                params=paused_task.params,
+                rank=rank,
+                command_display=str(paused_task.description),
+            )
             result.needs_approval = paused_task.tool_name
+            result.permission_request_id = pending.request_id
+            result.permission_keyboard = self.permission_handler.build_keyboard(pending)
             result.answer = req["text"]
             result.elapsed_sec = time.time() - t0
             # HIGH: Jarvis paused an action awaiting Sir's approval.

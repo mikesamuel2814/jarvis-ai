@@ -294,8 +294,23 @@ async def orchestrate(req: OrchestrateRequest, x_api_key: str = Header(default=N
         "tasks_completed": result.tasks_completed,
         "tasks_failed": result.tasks_failed,
         "needs_approval": result.needs_approval,
+        "permission_request_id": result.permission_request_id,
+        "permission_keyboard": result.permission_keyboard,
         "elapsed_sec": result.elapsed_sec,
     }
+
+
+@app.post("/v3/permission/{request_id}/{action}")
+async def resolve_permission(request_id: str, action: str,
+                             x_api_key: str = Header(default=None)):
+    """Resolve a progressive-trust permission button press (allow / save / deny).
+    Called by the Telegram bot when Sir taps a v3 permission button."""
+    require_api_key(x_api_key)
+    if action not in ("allow", "save", "deny"):
+        raise HTTPException(status_code=400, detail="invalid action")
+    handler = get_orchestrator().permission_handler
+    res = await handler.handle(f"v3perm:{request_id}:{action}")
+    return res
 
 
 # ── v3 Brain Router ─────────────────────────────────────────────────

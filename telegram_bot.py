@@ -1147,6 +1147,20 @@ def main():
         query = update.callback_query
         await query.answer()
         data = query.data
+        if data.startswith("v3perm:"):
+            # Progressive-trust permission button: v3perm:<request_id>:<action>
+            try:
+                _, req_id, action = data.split(":", 2)
+                resp = requests.post(f"{API_BASE}/v3/permission/{req_id}/{action}",
+                                     headers=_ah(), timeout=120)
+                msg = resp.json().get("message", "Done, Sir.")
+                await query.edit_message_text(msg, parse_mode="Markdown")
+            except requests.exceptions.ConnectionError:
+                await query.edit_message_text("⚠️ Sorry Sir, Jarvis API is not reachable right now.")
+            except Exception as e:
+                log.warning("v3perm callback error: %s", e)
+                await query.edit_message_text("⚠️ Sorry Sir, the permission could not be processed.")
+            return
         if data.startswith("good_"):
             iid = data[5:]
             _send_feedback(iid, "good")
@@ -1537,6 +1551,45 @@ def main():
         except Exception as e:
             log.warning("task_cmd error: %s", e)
             await send(update, f"⚠️ Sorry Sir, the task could not be queued. Please try again.")
+
+    async def orchestrate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Run a task through the v3 master orchestrator (swarm + Guard).
+        Renders [Allow][Allow & Save][Deny] buttons when a step needs approval."""
+        from fmt import bold, code
+        task = " ".join(context.args).strip() if context.args else ""
+        if not task:
+            await send(update,
+                "Usage: /orchestrate <i>task</i>\n"
+                "Example: <code>/orchestrate audit my server security</code>",
+                already_html=True)
+            return
+        await send(update, f"🧠 Orchestrating:\n{code(task[:200])}", already_html=True)
+        try:
+            resp = requests.post(f"{API_BASE}/v3/orchestrate",
+                                 json={"request": task}, headers=_ah(), timeout=180)
+            d = resp.json()
+        except requests.exceptions.ConnectionError:
+            await send(update, "⚠️ Sorry Sir, Jarvis API is not reachable right now.")
+            return
+        except Exception as e:
+            log.warning("orchestrate_cmd error: %s", e)
+            await send(update, "⚠️ Sorry Sir, the orchestration failed.")
+            return
+
+        kb_rows = d.get("permission_keyboard") or []
+        if d.get("needs_approval") and kb_rows:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"])
+                 for btn in row] for row in kb_rows
+            ])
+            await update.message.reply_text(d.get("answer", "Permission required, Sir."),
+                                            reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            ans = d.get("answer", "Done, Sir.")
+            meta = (f"\n\n<i>{d.get('tasks_completed', 0)}/"
+                    f"{d.get('tasks_dispatched', 0)} tasks · "
+                    f"{d.get('elapsed_sec', 0):.1f}s</i>")
+            await send(update, ans + meta, already_html=False)
 
     async def exec_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Smart action dispatch — detect action or plan via claude-plan."""
