@@ -1,0 +1,83 @@
+{
+  "absolute_blocks": [
+    {
+      "pattern": "rm\\s+-rf\\s+/",
+      "action": "block",
+      "severity": "critical",
+      "reason": "Destructive recursive deletion of root filesystem"
+    },
+    {
+      "pattern": "mkfs\\.",
+      "action": "block",
+      "severity": "critical",
+      "reason": "Filesystem formatting"
+    },
+    {
+      "pattern": ">\\s*/dev/sd[a-z]",
+      "action": "block",
+      "severity": "critical",
+      "reason": "Direct block device overwrite"
+    },
+    {
+      "pattern": "dd\\s+if=.+of=/dev/",
+      "action": "block",
+      "severity": "critical",
+      "reason": "Direct disk write with dd"
+    },
+    {
+      "pattern": "wget.*\\|.*sh",
+      "action": "confirm",
+      "severity": "high",
+      "reason": "Pipe from web to shell execution"
+    },
+    {
+      "pattern": "curl.*\\|.*sh",
+      "action": "confirm",
+      "severity": "high",
+      "reason": "Pipe from web to shell execution"
+    },
+    {
+      "pattern": "eval\\s*\\(",
+      "action": "confirm",
+      "severity": "high",
+      "reason": "Dynamic code evaluation"
+    },
+    {
+      "pattern": "base64\\s+-d.*\\|",
+      "action": "confirm",
+      "severity": "high",
+      "reason": "Base64 decode piped to execution"
+    }
+  ],
+  "resource_limits": {
+    "max_file_size_mb": 100,
+    "max_command_timeout": 300,
+    "blocked_paths": [
+      "/etc/shadow",
+      "/etc/sudoers",
+      "/root/.ssh",
+      "/boot",
+      "/proc",
+      "/sys",
+      "/dev/mem"
+    ],
+    "max_parallel_tools": 10,
+    "max_daily_api_calls": 10000
+  },
+  "privacy_rules": {
+    "never_externally_send": [
+      "AsthaCash",
+      "Starline",
+      ".ssh",
+      "credentials",
+      ".env",
+      "secrets",
+      "admin93",
+      "VPS IP"
+    ],
+    "redact_patterns": [
+      "\\b(?:sk-|pk-)[a-zA-Z0-9]{20,}\\b",
+      "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+    ]
+  }
+}

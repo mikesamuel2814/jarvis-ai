@@ -1,0 +1,48 @@
+# Core ML / Training (CUDA 12.4 compatible)
+torch==2.3.1+cu121
+torchvision==0.18.1+cu121
+torchaudio==2.3.1+cu121
+unsloth[cu121-ampere] @ git+https://github.com/unslothai/unsloth.git
+transformers>=4.42.0
+datasets>=2.20.0
+accelerate>=0.32.0
+peft>=0.11.0
+bitsandbytes>=0.43.0
+trl>=0.15.0
+axolotl[flash-attn,deepspeed] @ git+https://github.com/OpenAccessMachineLearning/axolotl.git
+
+# Agent / Memory
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-community>=0.2.0
+llama-index>=0.11.0
+chromadb>=0.5.0
+qdrant-client>=1.10.0
+
+# Serving
+vllm>=0.5.0
+llama-cpp-python>=0.2.85
+
+# Utilities
+pydantic>=2.7.0
+aiosqlite>=0.20.0
+aiohttp>=3.9.0
+fastapi>=0.111.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9
+
+# Security / Monitoring
+psutil>=6.0.0
+cryptography>=42.0.0
+python-jose>=3.3.0
+
+# Data / synthetic generation
+jinja2>=3.1.0
+pyyaml>=6.0.0
+jsonlines>=4.0.0
+
+# HuggingFace
+huggingface-hub>=0.23.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
+protobuf>=5.27.0
