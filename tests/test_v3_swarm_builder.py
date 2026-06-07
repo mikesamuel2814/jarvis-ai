@@ -189,6 +189,29 @@ def test_notifier():
           n.notify("anything", Level.CRITICAL, dry_run=True) is False)
 
 
+def test_routing_feedback():
+    print("[learner — routing-accuracy feedback]")
+    from learner import analyze_routing_feedback
+    inter = [
+        {"tier": "edge", "rating": "bad", "response": "x", "query": "why down"},
+        {"tier": "edge", "rating": "bad", "response": "x", "query": "root cause"},
+        {"tier": "edge", "rating": "bad", "response": "x", "query": "analyze it"},
+        {"tier": "edge", "rating": "good", "response": "ok", "query": "cpu"},
+        {"tier": "nano", "rating": "good", "response": "y" * 1500, "query": "explain"},
+        {"tier": "nano", "rating": "good", "response": "y" * 1500, "query": "explain2"},
+        {"tier": "nano", "rating": "good", "response": "y" * 1500, "query": "explain3"},
+        {"tier": "approve", "rating": "good", "response": "z", "query": "legacy v2"},
+    ]
+    rf = analyze_routing_feedback(inter)  # no chromadb → no lesson upsert
+    check("only v3 tiers counted (legacy 'approve' ignored)",
+          set(rf["per_tier"]) == {"edge", "nano"})
+    check("high-failure tier flagged",
+          any("Tier 'edge' has a high failure" in i for i in rf["insights"]))
+    check("under-routing (long nano answers) flagged",
+          any("nano" in i and "escalation" in i for i in rf["insights"]))
+    check("no lesson stored without a collection", rf["lessons_added"] == 0)
+
+
 async def main():
     await test_swarm()
     test_remedy()
@@ -197,6 +220,7 @@ async def main():
     test_brain_clients()
     await test_callbacks()
     test_notifier()
+    test_routing_feedback()
     print("\nALL V3 SWARM/BUILDER/ROUTER/UI/NOTIFY TESTS PASSED ✅")
 
 

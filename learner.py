@@ -44,6 +44,7 @@ GOLDEN_LOG       = JARVIS_HOME / "data" / "golden_examples.jsonl"
 CORRECTIONS_LOG  = JARVIS_HOME / "data" / "corrections.jsonl"
 LESSONS_LOG      = JARVIS_HOME / "data" / "lessons.jsonl"
 DECISION_STATE   = JARVIS_HOME / "data" / "decision_state.json"
+ROUTING_LOG_V3   = JARVIS_HOME / "data" / "routing_decisions_v3.jsonl"
 TRAINING_LOG     = TRAINING_LOG_FOR_LOG
 SKILLS_DIR       = JARVIS_HOME / "skills"
 SKILL_GAPS_LOG   = SKILLS_DIR / "gaps.jsonl"
@@ -292,6 +293,17 @@ def print_stats():
     print(f"  Corrections:        {corrections}")
     print(f"  Lesson candidates:  {lessons}")
     print(f"  Last training: {last_training}")
+
+    # Routing-accuracy summary (no chromadb needed — pure correlation).
+    rf = analyze_routing_feedback(all_interactions)
+    if rf["per_tier"]:
+        print("  -- v3 routing --")
+        for t, s in sorted(rf["per_tier"].items(),
+                           key=lambda kv: -kv[1]["n"]):
+            print(f"    {t:7} n={s['n']:<3} good={s['good']} bad={s['bad']} "
+                  f"bad_rate={s['bad_rate']:.0%}")
+        for ins in rf["insights"]:
+            print(f"    ⚠ {ins[:96]}")
     print("=" * 42)
 
 
@@ -355,6 +367,104 @@ def auto_digest_inbox(collection, embed_model: str) -> int:
         except Exception as e:
             log(f"  [inbox] failed {fpath.name}: {e}")
     return digested
+
+
+# Valid v3 brain tiers (kept inline so this module needs no heavy imports).
+V3_TIERS = {"nano", "edge", "cursor", "hybrid", "kimi", "cloud", "swarm"}
+# Cost ordering, cheapest → most expensive. Used to spot over-/under-routing.
+TIER_COST = {"nano": 0, "edge": 1, "cursor": 2, "hybrid": 3,
+             "swarm": 4, "kimi": 5, "cloud": 6}
+
+
+def analyze_routing_feedback(interactions: list[dict],
+                             collection=None, embed_model: str = "") -> dict:
+    """Correlate v3 routing decisions with response outcomes to find systematic
+    mis-routes. Builds per-tier good/bad stats, joins the routing-decision log
+    for confidence, and emits actionable insights + a memory lesson.
+
+    Returns {"per_tier": {...}, "insights": [...], "lessons_added": int}.
+    """
+    # Per-tier outcome stats from interactions that carry a real v3 tier.
+    per_tier: dict[str, dict] = {}
+    for it in interactions:
+        tier = (it.get("tier") or "").lower()
+        if tier not in V3_TIERS:
+            continue
+        s = per_tier.setdefault(
+            tier, {"n": 0, "good": 0, "bad": 0, "resp_len_sum": 0})
+        s["n"] += 1
+        rating = it.get("rating")
+        if rating == "good":
+            s["good"] += 1
+        elif rating == "bad":
+            s["bad"] += 1
+        s["resp_len_sum"] += len(it.get("response", "") or "")
+
+    for t, s in per_tier.items():
+        rated = s["good"] + s["bad"]
+        s["bad_rate"] = round(s["bad"] / rated, 3) if rated else 0.0
+        s["avg_resp_len"] = round(s["resp_len_sum"] / s["n"], 1) if s["n"] else 0
+
+    # Join the routing-decision log (confidence) to bad outcomes by query prefix.
+    decisions = _read_jsonl(ROUTING_LOG_V3)
+    bad_queries = {(it.get("query", "") or "")[:60].lower()
+                   for it in interactions if it.get("rating") == "bad"}
+    lowconf_bad = 0
+    conf_sum = {"good": 0.0, "good_n": 0}
+    for d in decisions:
+        snip = (d.get("query_snippet", "") or "").lower()
+        conf = float(d.get("confidence", 0.0))
+        # snippet starts with "Request: <query>" for synthesised calls; strip it
+        probe = snip.replace("request: ", "")[:60]
+        if any(probe and probe.startswith(bq[:40]) for bq in bad_queries):
+            if conf < 0.6:
+                lowconf_bad += 1
+
+    insights: list[str] = []
+    for t, s in sorted(per_tier.items(), key=lambda kv: -kv[1]["bad_rate"]):
+        rated = s["good"] + s["bad"]
+        if rated >= 3 and s["bad_rate"] >= 0.4:
+            insights.append(
+                f"Tier '{t}' has a high failure rate ({s['bad_rate']:.0%} of "
+                f"{rated} rated). Review its routing patterns — queries landing "
+                f"here may belong on a different tier.")
+        # Under-routing: cheap tier producing very long answers often means the
+        # query was harder than the router judged (should have escalated).
+        if t in ("nano", "edge") and s["avg_resp_len"] > 1200 and s["n"] >= 3:
+            insights.append(
+                f"Tier '{t}' is producing long answers (avg "
+                f"{s['avg_resp_len']:.0f} chars) — these queries may warrant "
+                f"escalation to CLOUD/HYBRID; consider tightening its patterns.")
+    if lowconf_bad >= 2:
+        insights.append(
+            f"{lowconf_bad} low-confidence (<0.6) routes scored 'bad' — the "
+            f"classifier is guessing on these; add explicit patterns or seed "
+            f"intents for them.")
+
+    # Persist insights into decision_state.json for the dashboard / briefing.
+    try:
+        state: dict = {}
+        if DECISION_STATE.exists():
+            state = json.loads(DECISION_STATE.read_text())
+        state["routing_feedback"] = {
+            "per_tier": per_tier,
+            "insights": insights,
+            "updated": datetime.now().isoformat(),
+        }
+        DECISION_STATE.write_text(json.dumps(state, indent=2))
+    except Exception as e:
+        log(f"  [routing] could not write decision_state.json: {e}")
+
+    # Store the top insight as a memory lesson so the brain self-corrects.
+    lessons_added = 0
+    if insights and collection is not None and embed_model:
+        lesson = "ROUTING INSIGHT: " + " ".join(insights[:2])
+        upsert_lesson(collection, embed_model, lesson, "routing",
+                      datetime.now().isoformat())
+        lessons_added = 1
+
+    return {"per_tier": per_tier, "insights": insights,
+            "lessons_added": lessons_added}
 
 
 def run_learning():
@@ -489,6 +599,20 @@ def run_learning():
     gaps_promoted = detect_skill_gaps(interactions)
     if gaps_promoted:
         log(f"  [skills] {gaps_promoted} topics promoted to needs_training")
+
+    # Routing-accuracy feedback: correlate v3 tier choices with outcomes and
+    # surface systematic mis-routes (self-tuning router).
+    routing_lessons = 0
+    try:
+        rf = analyze_routing_feedback(interactions, collection, embed_model)
+        routing_lessons = rf["lessons_added"]
+        lessons_added += routing_lessons
+        for ins in rf["insights"]:
+            log(f"  [routing] {ins[:120]}")
+        if not rf["insights"] and rf["per_tier"]:
+            log(f"  [routing] {len(rf['per_tier'])} tiers analysed — no systematic mis-routes")
+    except Exception as _rf:
+        log(f"  [routing] feedback analysis skipped: {_rf}")
 
     # Digest any files dropped into ~/.jarvis/inbox/
     inbox_count = auto_digest_inbox(collection, embed_model)
