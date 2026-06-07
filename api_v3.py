@@ -207,6 +207,7 @@ class AgentRequest(BaseModel):
     task: str
     max_steps: int = 6
     allow_destructive: bool = False
+    history: list = []
 
 
 # ── Health ──────────────────────────────────────────────────────────
@@ -411,12 +412,15 @@ async def agent_endpoint(req: AgentRequest, x_api_key: str = Header(default=None
     Delegates to jarvis_agent_v3.run_agent_v3()."""
     require_api_key(x_api_key)
     try:
+        import uuid
         from jarvis_agent_v3 import run_agent_v3
         result = await run_agent_v3(
             task=req.task,
             max_steps=req.max_steps,
             allow_destructive=req.allow_destructive,
+            history=req.history,
         )
+        result["interaction_id"] = str(uuid.uuid4())
         return result
     except Exception as exc:
         log.exception("Agent endpoint failed")
