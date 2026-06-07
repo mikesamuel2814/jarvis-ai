@@ -178,6 +178,13 @@ class RouteRequest(BaseModel):
     query: str
 
 
+class AskRequest(BaseModel):
+    query: str
+    context: str = ""
+    history: list = []
+    system_prompt: str = ""
+
+
 # ── Health ──────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -302,6 +309,30 @@ def route_query(req: RouteRequest, x_api_key: str = Header(default=None)):
     router = get_brain_router()
     tier = router.route(req.query)
     return {"tier": tier.value, "latency_ms": tier.latency_ms}
+
+
+@app.post("/v3/ask")
+async def ask(req: AskRequest, x_api_key: str = Header(default=None)):
+    """Core conversational brain: route the query through the 7-tier router AND
+    run real inference, with automatic tier fallback. Returns the answer."""
+    require_api_key(x_api_key)
+    if not _feature_flag("brain_router"):
+        raise HTTPException(status_code=503, detail="Brain router not enabled")
+
+    router = get_brain_router()
+    try:
+        resp = await router.execute(
+            req.query, context=req.context, history=req.history or None,
+            system_prompt=req.system_prompt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"inference failed: {exc}")
+    return {
+        "answer": resp.content,
+        "model": resp.model,
+        "reasoning": resp.reasoning,
+        "latency_ms": round(resp.latency_ms),
+    }
 
 
 # ── v3 Guardian ─────────────────────────────────────────────────────
