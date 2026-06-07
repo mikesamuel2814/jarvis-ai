@@ -22,6 +22,8 @@ import yaml
 
 from user_facts import facts_prompt_block, load_facts, save_facts, remember_from_message
 
+JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
+
 # JV Titan — Core Brain Protocol integration
 sys.path.insert(0, str(JARVIS_HOME))
 try:
@@ -29,8 +31,6 @@ try:
     _HAS_TITAN = True
 except Exception as _titan_exc:
     _HAS_TITAN = False
-
-JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 CONFIG_FILE = JARVIS_HOME / "config" / "jarvis.yaml"
 LOG_FILE = JARVIS_HOME / "logs" / "telegram_bot.log"
 HISTORY_FILE = JARVIS_HOME / "data" / "telegram_history.json"
