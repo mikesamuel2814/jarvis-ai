@@ -97,9 +97,30 @@ async def test_builder():
         shutil.rmtree(Path("/home/kali/.jarvis/tools/dynamic") / n, ignore_errors=True)
 
 
+def test_codegen():
+    print("[code generator — provider independence]")
+    from tool_builder.code_generator import CodeGenerator
+    gen = CodeGenerator(prefer_local=True)
+    # Synthesis path needs no LLM and self-verifies the shell command.
+    code = gen._gen_synth("a tool to check disk free space", "")
+    import ast
+    ast.parse(code)
+    check("synthesis produces valid decorated tool",
+          "@jarvis_tool" in code and "subprocess" in code)
+    check("synthesis maps disk intent to df", "df -h" in code)
+    # Chain falls through to synth when no other provider yields code.
+    g2 = CodeGenerator()
+    g2._gen_kimi = lambda p, s: (_ for _ in ()).throw(RuntimeError("no key"))
+    g2._gen_local_code = lambda p, s: ""
+    g2._gen_local_reason = lambda p, s: ""
+    out, provider = g2.generate("show memory usage", "")
+    check("falls back to synth when LLMs unavailable", provider == "synth")
+
+
 async def main():
     await test_swarm()
     test_remedy()
+    test_codegen()
     await test_builder()
     print("\nALL V3 SWARM/BUILDER TESTS PASSED ✅")
 

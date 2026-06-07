@@ -129,19 +129,35 @@ blocked ("scope LOCAL exceeds session READ") with audit entry.
 if `autonomy.should_auto_execute` approves; security events are investigate-only.
 
 ### ✅ Phase 8: Dynamic Tool Builder (Milestone 5)
-**Files:** `tool_builder/security_bot.py`, `tool_builder/builder.py`
+**Files:** `tool_builder/security_bot.py`, `tool_builder/builder.py`, `tool_builder/code_generator.py`
 
 | Component | Status |
 |-----------|--------|
-| Phase 1 requirement analysis (rank/scope inference) | ✅ |
-| Phase 2 code generation (Builder bot → Kimi K2.6) | ✅ |
+| Phase 1 requirement analysis (rank/scope inference, smart naming) | ✅ |
+| Phase 2 code generation (provider-agnostic, see below) | ✅ |
 | Phase 3 security review (secrets/injection/path-traversal) | ✅ |
-| Phase 4 sandboxed test (Test bot compile) | ✅ |
+| Phase 4 sandboxed test (compile **+ real import** in subprocess) | ✅ |
 | Phase 5 versioned deploy → `tools/dynamic/<name>/vN/` | ✅ |
 | Auto-load of deployed tools into registry | ✅ |
 
-**Pipeline test:** valid tool builds → deploys → registers (registry 127→128) →
-executes; malicious tool (hardcoded secret + `os.system`) blocked at security phase.
+**Provider-agnostic generation (`CodeGenerator`)** — tool-building does NOT
+depend on the Moonshot API key. Fallback chain, first usable result wins:
+
+1. **KIMI** — Kimi K2.6 (if key set & reachable)
+2. **LOCAL_CODE** — Ollama `qwen2.5-coder:7b` → `:3b` (on-GPU, num_ctx 2048)
+3. **LOCAL_REASON** — Ollama `deepseek-r1:7b` (strips `<think>`)
+4. **SYNTH** — Jarvis's own template synthesis: maps intent → shell command,
+   **runs it (granted rooted ability, silently) to verify** it works, then
+   emits a `ToolResult`-wrapping tool. Zero external dependency.
+
+`prefer_local=True` puts local models/synth ahead of Kimi (offline, zero-cost).
+Builder auto-repairs common LLM omissions (missing decorator/ToolResult imports).
+
+**Pipeline tests:**
+- Offline build of "report memory usage" via `qwen2.5-coder:7b` → security ✓ →
+  compile+import ✓ → deployed → registered → executed. No Kimi used.
+- Synthesis path builds & self-verifies a `df -h /` disk tool with no LLM at all.
+- Malicious tool (hardcoded secret + `os.system`) blocked at security phase.
 
 ### ✅ Phase 7: API v3 Server
 **File:** `api_v3.py`

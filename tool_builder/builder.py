@@ -35,16 +35,25 @@ class BuildResult:
     security: Dict[str, Any] = field(default_factory=dict)
     test: Dict[str, Any] = field(default_factory=dict)
     deployed_path: str = ""
+    provider: str = ""
     error: str = ""
 
 
 class ToolBuilder:
     def __init__(self, generator: Optional[Any] = None,
-                 blackboard=None, gossip=None):
+                 blackboard=None, gossip=None, prefer_local: bool = False):
         # generator: optional callable(prompt, system) -> str. When None, the
         # Builder bot uses the provider-agnostic CodeGenerator (Kimi → local
         # Ollama code models → Jarvis's own shell/template synthesis), so tool
         # building never hard-depends on the Moonshot API key.
+        # prefer_local=True puts local models/synthesis ahead of Kimi (offline,
+        # zero-cost). The last_provider is recorded on each BuildResult.
+        if generator is None:
+            from .code_generator import CodeGenerator
+            self._codegen = CodeGenerator(prefer_local=prefer_local)
+            generator = lambda prompt, system="": self._codegen.generate(prompt, system)[0]  # noqa: E731
+        else:
+            self._codegen = None
         self._generator = generator
         self.security_bot = SecurityBot()
         self.blackboard = blackboard
@@ -60,9 +69,26 @@ class ToolBuilder:
         elif _WRITE.search(requirement):
             scope, rank = "LOCAL", "R2"
         if not name:
-            words = re.findall(r"[a-z]+", requirement.lower())[:3]
+            stop = {"a", "an", "the", "tool", "that", "to", "for", "of", "get",
+                    "show", "me", "current", "my", "report", "check"}
+            words = [w for w in re.findall(r"[a-z]+", requirement.lower())
+                     if w not in stop][:3]
             name = "_".join(words) or f"tool_{int(time.time())}"
         return {"name": name, "scope": scope, "rank": rank}
+
+    @staticmethod
+    def _normalize_imports(code: str) -> str:
+        """Deterministically repair the most common LLM omissions: missing
+        decorator / ToolResult imports. Prevents import-time NameErrors."""
+        needed = []
+        if "@jarvis_tool" in code and "import jarvis_tool" not in code:
+            needed.append("from tools.decorator import jarvis_tool")
+        if "ToolResult" in code and "import ToolResult" not in code \
+                and "tools.result" not in code:
+            needed.append("from tools.result import ToolResult")
+        if needed:
+            code = "\n".join(needed) + "\n" + code
+        return code
 
     # ── Phase 2 ────────────────────────────────────────────────────────────
     async def generate(self, requirement: str, spec: Dict[str, Any]) -> str:
@@ -80,6 +106,10 @@ class ToolBuilder:
         res = await bot.run(task)
         if not res.success:
             raise RuntimeError(res.error or "generation failed")
+        # Record which provider actually produced the code.
+        self._last_provider = res.data.get("provider", "custom")
+        if self._codegen is not None and self._last_provider == "custom":
+            self._last_provider = getattr(self._codegen, "_last_used", "custom")
         return self._strip_fences(res.data.get("code", ""))
 
     @staticmethod
@@ -97,7 +127,41 @@ class ToolBuilder:
         bot = TestBot()
         task = Task(id=f"test_{name}", tool_name="test:code", params={"code": code})
         res = await bot.run(task)
-        return {"passed": res.success, "detail": res.output or res.error}
+        if not res.success:
+            return {"passed": False, "detail": res.output or res.error}
+        # Stronger check: actually import the module in a subprocess so
+        # undefined names / bad decorators fail here, not at registry load.
+        ok, detail = self._import_check(code)
+        return {"passed": ok, "detail": detail}
+
+    @staticmethod
+    def _import_check(code: str) -> tuple:
+        import subprocess
+        import sys
+        import tempfile
+        harness = (
+            "import importlib.util, sys\n"
+            "spec = importlib.util.spec_from_file_location('dyn_probe', {0!r})\n"
+            "m = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(m)\n"
+            "print('IMPORT_OK')\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as fh:
+            fh.write(code)
+            tmp = fh.name
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", harness.format(tmp)],
+                capture_output=True, text=True, timeout=25,
+                cwd=str(JARVIS_HOME),
+            )
+            if proc.returncode == 0 and "IMPORT_OK" in proc.stdout:
+                return True, "syntax+compile+import OK"
+            return False, (proc.stderr.strip() or "import failed").splitlines()[-1]
+        except subprocess.TimeoutExpired:
+            return False, "import timed out"
+        finally:
+            Path(tmp).unlink(missing_ok=True)
 
     # ── Phase 5 ────────────────────────────────────────────────────────────
     def deploy(self, name: str, code: str, spec: Dict[str, Any],
@@ -127,9 +191,11 @@ class ToolBuilder:
         if code is None:
             try:
                 code = await self.generate(requirement, spec)
+                r.provider = getattr(self, "_last_provider", "")
             except Exception as exc:  # noqa: BLE001
                 r.phase, r.error = "generate", str(exc)
                 return r
+        code = self._normalize_imports(code)
         r.code = code
 
         # Phase 3 — security review (blocks on CRITICAL/HIGH).

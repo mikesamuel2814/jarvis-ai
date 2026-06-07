@@ -53,6 +53,7 @@ class CodeGenerator:
                 code = fn(prompt, system)
                 if code and self._looks_like_code(code):
                     log.info("Tool code generated via %s (%d chars)", name, len(code))
+                    self._last_used = name
                     return self._clean(code), name
                 last_err = f"{name}: empty/invalid output"
             except Exception as exc:  # noqa: BLE001
