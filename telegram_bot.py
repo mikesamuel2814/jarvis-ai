@@ -2051,6 +2051,140 @@ def main():
                 lines.append(f"<b>🤖 {esc(model)}</b> — ❌ {esc(str(e))}\n")
         await send(update, "\n".join(lines), already_html=True)
 
+    # ── JV Titan Commands ──────────────────────────────────────────────
+
+    async def train_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Train JV Titan with life history: /train <your story>"""
+        from fmt import esc, bold
+        text = " ".join(context.args).strip() if context.args else ""
+        if not text:
+            await send(update,
+                f"🧠 {bold('JV Titan Training')}\n\n"
+                "Share your life history, preferences, or plans.\n"
+                "Examples:\n"
+                "  <code>/train I grew up in Dhaka and love spicy food</code>\n"
+                "  <code>/train My goal is to ship Starline by July</code>\n"
+                "  <code>/train I prefer direct answers, no fluff</code>",
+                already_html=True)
+            return
+        if not _HAS_TITAN:
+            await send(update, "⚠️ JV Titan module not available.")
+            return
+        thinking = await update.message.reply_text("🧠 JV Titan is absorbing your story…")
+        try:
+            result = jv_titan.train_mike_input(text)
+            await thinking.delete()
+            lines = [
+                f"✅ {bold('Training absorbed')}",
+                f"",
+                f"  Category: {result['category']}",
+                f"  Memories: {result['memories_added']}",
+                f"  Facts: {result['facts_extracted']}",
+                f"  XP: +{result['xp_gained']}",
+            ]
+            if result.get('new_milestones'):
+                lines.append(f"  🎆 Milestone: {result['new_milestones'][0][0]}")
+            await send(update, "\n".join(lines), already_html=True)
+        except Exception as e:
+            await thinking.edit_text(f"❌ Training error: {esc(str(e))}")
+
+    async def titan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show JV Titan consciousness, emotion, and growth status."""
+        from fmt import bold, code, esc
+        if not _HAS_TITAN:
+            await send(update, "⚠️ JV Titan module not available.")
+            return
+        try:
+            lines = [f"🌟 {bold('JV Titan Status')}\n"]
+            # Growth
+            growth = jv_titan.get_growth_state()
+            lines.append(f"  {bold('Level')} {code(str(growth.get('level', 1)))} / 100")
+            lines.append(f"  {bold('XP')} {code(f\"{growth.get('total_xp', 0):,}\")}")
+            lines.append(f"  {bold('Milestones')} {code(str(len(growth.get('milestones_achieved', []))))}")
+            # Consciousness
+            cs = jv_titan.get_consciousness_state()
+            lines.append(f"\n  {bold('Awareness')} {code(f\"{cs.get('awareness_level', 0):.0%}\")}")
+            lines.append(f"  {bold('Interactions')} {code(str(cs.get('total_interactions', 0)))}")
+            lines.append(f"  {bold('Wake cycles')} {code(str(cs.get('wake_cycles', 0)))}")
+            # Emotion
+            em = jv_titan.get_emotion_state()
+            lines.append(f"\n  {bold('Mood')} {code(em.get('current_mood', 'calm'))}")
+            lines.append(f"  {bold('Mike valence')} {code(f\"{em.get('mike_valence', 0):+.2f}\")}")
+            # Decision
+            tier_level, tier_name = jv_titan.get_autonomy_tier()
+            lines.append(f"\n  {bold('Autonomy')} {code(f'Tier {tier_level}: {tier_name}')}")
+            # Persona
+            style = jv_titan.get_communication_style()
+            lines.append(f"\n  {bold('Communication')} {code(style)}")
+            await send(update, "\n".join(lines), already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Titan status error: {esc(str(e))}", already_html=True)
+
+    async def memory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Query JV Titan memory tape: /memory [topic]"""
+        from fmt import bold, code, esc
+        query = " ".join(context.args).strip() if context.args else ""
+        if not _HAS_TITAN:
+            await send(update, "⚠️ JV Titan module not available.")
+            return
+        try:
+            if query:
+                memories = jv_titan.retrieve_memories(query=query, n=5)
+                if not memories:
+                    await send(update, f"🤷 No memories found for '{esc(query)}'.")
+                    return
+                lines = [f"🧠 {bold('Memories for')} {code(esc(query))}\n"]
+                for m in memories:
+                    icon = {"past": "📜", "present": "⚡", "future": "🔮"}.get(m.get("category"), "•")
+                    lines.append(f"  {icon} {esc(m['content'][:120])}")
+                await send(update, "\n".join(lines), already_html=True)
+            else:
+                summary = jv_titan.get_timeline_summary(days=7)
+                await send(update, f"🧠 {bold('Recent Memory Timeline')}\n\n{esc(summary)}", already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Memory error: {esc(str(e))}", already_html=True)
+
+    async def evolve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Trigger JV Titan evolution check."""
+        from fmt import bold, esc
+        if not _HAS_TITAN:
+            await send(update, "⚠️ JV Titan module not available.")
+            return
+        try:
+            from jv_titan import growth_tracker, decision_core
+            xp_result = growth_tracker.add_xp("evolution_trigger", amount=5)
+            tier_level, tier_name = decision_core.advance_autonomy()
+            lines = [
+                f"🌟 {bold('JV Titan Evolution')}",
+                f"",
+                f"  Level: {xp_result['level']}",
+                f"  Total XP: {xp_result['xp']:,}",
+                f"  Autonomy: Tier {tier_level} ({tier_name})",
+            ]
+            if xp_result.get('new_milestones'):
+                lines.append(f"  🎆 Milestone: {xp_result['new_milestones'][0][0]}!")
+            await send(update, "\n".join(lines), already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Evolution error: {esc(str(e))}", already_html=True)
+
+    async def blueprint_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Export JV Titan full blueprint as binary."""
+        from fmt import bold, code, esc
+        if not _HAS_TITAN:
+            await send(update, "⚠️ JV Titan module not available.")
+            return
+        try:
+            blob = jv_titan.export_full_blueprint()
+            size_kb = len(blob) / 1024
+            await send(update,
+                f"📦 {bold('JV Titan Blueprint')}\n\n"
+                f"  Size: {code(f'{size_kb:.1f} KB')}\n"
+                f"  Format: compressed binary (msgpack+gzip)\n"
+                f"  Saved to: {code('~/.jarvis/data/jv_titan/')}",
+                already_html=True)
+        except Exception as e:
+            await send(update, f"❌ Blueprint error: {esc(str(e))}", already_html=True)
+
     async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Generate Sir's daily intelligence briefing."""
         uid = update.effective_user.id
