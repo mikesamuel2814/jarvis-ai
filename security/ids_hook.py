@@ -180,6 +180,14 @@ class IDSHook:
             logger.error("SUID scan failed: %s", exc)
 
         baseline = self.state.get("suid_checksums", {})
+        # First run: establish the baseline silently instead of flagging every
+        # pre-existing system SUID binary as "newly added".
+        if not baseline:
+            self.state["suid_checksums"] = current_suids
+            self._save_state()
+            logger.info("SUID baseline established (%d binaries)", len(current_suids))
+            return alerts
+
         added = set(current_suids.keys()) - set(baseline.keys())
         removed = set(baseline.keys()) - set(current_suids.keys())
         for f in added:
