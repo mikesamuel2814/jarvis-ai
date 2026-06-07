@@ -50,7 +50,7 @@ class TelegramRenderer:
             )}
 
         if msg_type == MessageType.PERMISSION:
-            return {"text": templates.permission_request(
+            out = {"text": templates.permission_request(
                 data.get("command", ""),
                 data.get("rank", "R2"),
                 data.get("downtime_sec"),
@@ -58,6 +58,11 @@ class TelegramRenderer:
                 data.get("system_context"),
                 data.get("project_impact"),
             )}
+            # Inline [Allow] [Allow & Save] [Deny] keyboard if provided by the
+            # PermissionCallbackHandler (rows of {text, callback_data}).
+            if data.get("keyboard"):
+                out["reply_markup"] = data["keyboard"]
+            return out
 
         if msg_type == MessageType.EXPANDABLE:
             return {"text": templates.expandable_section(data.get("title", ""), data.get("content", ""))}

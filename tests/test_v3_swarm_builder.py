@@ -117,12 +117,54 @@ def test_codegen():
     check("falls back to synth when LLMs unavailable", provider == "synth")
 
 
+def test_brain_clients():
+    print("[brain router — model clients]")
+    from models.clients import ModelDispatcher
+    from models.tier import BrainTier
+    d = ModelDispatcher()
+    check("all 7 tiers have a client", len(d.clients) == 7)
+    # Unavailable tier resolves to an available fallback (never crashes).
+    _, used = d.resolve(BrainTier.KIMI)
+    check("KIMI falls back to an available tier when key absent",
+          d.clients[used].is_available())
+    _, used2 = d.resolve(BrainTier.NANO)
+    check("NANO resolves (CPU always-on)", used2 in (BrainTier.NANO, BrainTier.EDGE))
+
+
+async def test_callbacks():
+    print("[telegram permission callbacks]")
+    from telegram_ui.callbacks import PermissionCallbackHandler
+    from security.trust_registry import TrustRegistry
+    tr = TrustRegistry()
+    ran = []
+
+    async def execu(tool, params):
+        ran.append(tool)
+        return {"ok": True}
+
+    h = PermissionCallbackHandler(trust_registry=tr, executor=execu)
+    p = h.register("v3cb_test_tool", {"x": 1}, "R3", "demo cmd")
+    kb = h.build_keyboard(p)
+    check("permission keyboard has 3 buttons", len(kb[0]) == 3)
+    save_cd = kb[0][1]["callback_data"]
+    res = await h.handle(save_cd)
+    check("allow & save executes + persists trust",
+          res["executed"] and tr.is_trusted("v3cb_test_tool", {"x": 1}))
+    check("consumed request expires on re-press",
+          (await h.handle(save_cd))["action"] == "expired")
+    p6 = h.register("v3cb_destruct", {}, "R6", "dd")
+    check("R6 destructive shows no buttons", h.build_keyboard(p6) == [])
+    tr.revoke_tool("v3cb_test_tool")  # cleanup
+
+
 async def main():
     await test_swarm()
     test_remedy()
     test_codegen()
     await test_builder()
-    print("\nALL V3 SWARM/BUILDER TESTS PASSED ✅")
+    test_brain_clients()
+    await test_callbacks()
+    print("\nALL V3 SWARM/BUILDER/ROUTER/UI TESTS PASSED ✅")
 
 
 if __name__ == "__main__":

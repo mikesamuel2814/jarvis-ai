@@ -45,7 +45,7 @@ v2 run_action(disk): PASS
 ```
 
 ### ✅ Phase 2: Brain Router v3 (Milestone 2)
-**Files:** `models/tier.py`, `models/client.py`, `brain_router.py`
+**Files:** `models/tier.py`, `models/client.py`, `models/clients.py`, `brain_router.py`
 
 | Component | Status |
 |-----------|--------|
@@ -53,6 +53,15 @@ v2 run_action(disk): PASS
 | ModelClient ABC | ✅ |
 | Intent classification (regex + embedding) | ✅ |
 | Routing decisions logged | ✅ |
+| **Concrete clients for all 7 tiers (live wiring)** | ✅ |
+| **`BrainRouter.execute()` — route → run → ModelResponse** | ✅ |
+| **Automatic tier fallback on unavailability** | ✅ |
+
+**Live backends:** NANO→Ollama phi4-mini (CPU), EDGE→qwen2.5-coder:7b (GPU,
+num_ctx 2048, single-GPU lock), KIMI→Kimi K2.6, CLOUD/CURSOR→Claude CLI,
+HYBRID→Edge pre-analysis + Cloud synthesis, SWARM→multi-model consensus.
+Verified: `!nano` → phi4-mini real inference ("Hello, good sir!", [tier=nano]);
+KIMI (no key) auto-falls back to Cloud.
 
 **Test:**
 ```
@@ -82,6 +91,14 @@ blocked ("scope LOCAL exceeds session READ") with audit entry.
 ### ✅ Phase 4: Master Orchestrator (Milestone 4)
 **Files:** `orchestrator.py`, `thinking/intent_classifier.py`, `thinking/decomposer.py`
 
+**Swarm + Router integration (new):** tool execution now routes through the
+Guard-gated `BotDispatcher` (shares the orchestrator's scope enforcer + trust
+registry), and Step 6 synthesis uses `BrainRouter.execute()` for a natural
+"Sir, ..." answer (template fallback if no model backend is reachable). Verified
+end-to-end: "show cpu and memory usage" → 2 tasks dispatched via Scanner bots →
+2 completed → LLM-synthesized answer, no approval needed.
+
+
 | Component | Status |
 |-----------|--------|
 | 6-step pipeline | ✅ |
@@ -104,7 +121,7 @@ blocked ("scope LOCAL exceeds session READ") with audit entry.
 ```
 
 ### ✅ Phase 5: Telegram Dynamic UI (Milestone 6)
-**Files:** `telegram/renderer.py`, `telegram/templates.py`
+**Files:** `telegram_ui/renderer.py`, `telegram_ui/templates.py`, `telegram_ui/callbacks.py`
 
 | Component | Status |
 |-----------|--------|
@@ -113,6 +130,14 @@ blocked ("scope LOCAL exceeds session READ") with audit entry.
 | Data Table, Alert Banner, Expandable | ✅ |
 | Permission Request template | ✅ |
 | Renderer with auto-classification | ✅ |
+| **[Allow] [Allow & Save] [Deny] inline keyboard + callbacks** | ✅ |
+| **Allow & Save → writes trust pattern (progressive trust)** | ✅ |
+| **R6 destructive → no buttons (typed-confirm only)** | ✅ |
+
+`PermissionCallbackHandler` is framework-light (`build_keyboard()` returns rows
+of `{text, callback_data}`; `handle(callback_data)` resolves the press) so it
+plugs into the existing python-telegram-bot setup. Verified: Allow & Save
+executes the action and persists trust; consumed requests expire on re-press.
 
 ### ✅ Phase 6: Proactive Guardian (Milestone 7)
 **Files:** `guardian/monitor.py`, `guardian/classifier.py`, `guardian/alerter.py`, `guardian/auto_remedy.py`
