@@ -181,11 +181,23 @@ class ToolBuilder:
         return str(vdir)
 
     # ── Full pipeline ────────────────────────────────────────────────────────
+    @staticmethod
+    def _notify(method: str, *args):
+        """Fire a notification without ever breaking the build pipeline."""
+        try:
+            from notifier import get_notifier
+            getattr(get_notifier(), method)(*args)
+        except Exception:  # noqa: BLE001
+            pass
+
     async def build(self, requirement: str, name: Optional[str] = None,
                     code: Optional[str] = None, deploy: bool = True) -> BuildResult:
         spec = self.analyze(requirement, name)
         r = BuildResult(name=spec["name"], success=False,
                         rank=spec["rank"], scope=spec["scope"])
+        # MEDIUM: a new tool/bot is being synthesized by Jarvis's decision.
+        self._notify("bot_request", spec["name"],
+                     f"{spec['rank']}/{spec['scope']} — {requirement[:80]}", "tool_builder")
 
         # Phase 2 — generate (skippable by passing code directly, e.g. for tests).
         if code is None:
