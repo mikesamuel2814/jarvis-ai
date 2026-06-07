@@ -204,43 +204,24 @@ class Orchestrator:
             self._guard.allow_destructive = True
             self.scope_enforcer.escalate(
                 ScopeLevel.PRIVILEGED, "orchestrator allow_destructive run")
-        await self.worker_pool.start()
-        task_map = {}
-        for st in subtasks:
-            priority = Priority.NORMAL
-            if intent.urgency.value == "critical":
-                priority = Priority.CRITICAL
-            elif intent.urgency.value == "high":
-                priority = Priority.HIGH
-
-            task = Task(
-                id=st.id,
-                tool_name=st.tool_name or "",
-                params=st.params,
-                priority=priority,
-                deps=st.deps,
-                timeout_sec=60.0,
-            )
-            await self.queue.submit(task)
-            task_map[st.id] = st
-            result.tasks_dispatched += 1
-
-        # Wait for queue to drain
-        await self.queue._queue.join()
-        await self.worker_pool.stop()
-
-        # Collect results
-        for st in subtasks:
-            bb_result = self.blackboard.read(f"task:{st.id}:result")
-            if bb_result:
+        # Python 3.13 compat: worker pool segfaults with asyncio tasks + C extensions.
+        # Execute subtasks directly via asyncio.gather instead.
+        result.tasks_dispatched = len(subtasks)
+        coros = [self._execute_tool(st.tool_name or "", st.params) for st in subtasks]
+        exec_results = await asyncio.gather(*coros, return_exceptions=True)
+        for st, res in zip(subtasks, exec_results):
+            if isinstance(res, Exception):
+                log.warning("Task %s failed: %s", st.id, res)
+                result.tasks_failed += 1
+                self.blackboard.write(f"task:{st.id}:result", {"error": str(res)})
+            else:
                 result.tasks_completed += 1
+                self.blackboard.write(f"task:{st.id}:result", res)
                 result.steps.append({
                     "task": st.id,
                     "tool": st.tool_name,
-                    "result": bb_result,
+                    "result": res,
                 })
-            else:
-                result.tasks_failed += 1
 
         # Step 6: Result Synthesis (LLM-backed, template fallback)
         result.answer = await self._synthesize_llm(request, result.steps, intent)
