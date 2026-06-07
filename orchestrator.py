@@ -149,6 +149,10 @@ class Orchestrator:
         # producing a Telegram button — rather than a silent hard-block. The
         # pause never executes; only Sir pressing Allow does (via the handler,
         # which bypasses the gate for that one approved call).
+        #
+        # Escalate scope BEFORE the gate if destructive actions are allowed,
+        # so pre-trusted tools can auto-run.
+        if allow_destructive:
         paused_task = None
         paused_rank = "R2"
         for st in subtasks:
@@ -202,8 +206,6 @@ class Orchestrator:
         # in-dispatch Guard so it doesn't re-block approved work.
         if allow_destructive:
             self._guard.allow_destructive = True
-            self.scope_enforcer.escalate(
-                ScopeLevel.PRIVILEGED, "orchestrator allow_destructive run")
         # Python 3.13 compat: worker pool segfaults with asyncio tasks + C extensions.
         # Execute subtasks directly via asyncio.gather instead.
         result.tasks_dispatched = len(subtasks)
