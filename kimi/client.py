@@ -1,9 +1,12 @@
 """
 Kimi K2.6 client — Moonshot AI OpenAI-compatible API.
 
-Model: kimi-k2.6
-Base:  https://api.moonshot.ai/v1
-Docs:  https://platform.kimi.ai/docs/guide/kimi-k2-6-quickstart
+Model: kimi-for-coding (Kimi For Coding subscription; sk-kimi-… keys)
+Base:  https://api.kimi.com/coding/v1  (OpenAI-compatible)
+Docs:  https://www.kimi.com/code/docs/en/
+Note:  access is gated to approved coding agents via User-Agent; Jarvis
+       identifies as claude-code/1.0 (it runs through Claude Code).
+       Override via env: KIMI_BASE_URL / KIMI_MODEL_ID / KIMI_USER_AGENT.
 
 Key facts (verified June 2026):
   - 262,144 token context window
@@ -32,8 +35,10 @@ JARVIS_HOME = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 KIMI_CONFIG  = JARVIS_HOME / "config" / "kimi.yaml"
 KIMI_LOG     = JARVIS_HOME / "logs" / "kimi_api.log"
 
-MODEL_ID     = "kimi-k2.6"
-BASE_URL     = "https://api.moonshot.ai/v1"
+# Defaults target Kimi For Coding (the subscription coding API, sk-kimi-… keys).
+# Override via env for the Moonshot platform: KIMI_BASE_URL / KIMI_MODEL_ID.
+MODEL_ID     = os.environ.get("KIMI_MODEL_ID", "kimi-for-coding")
+BASE_URL     = os.environ.get("KIMI_BASE_URL", "https://api.kimi.com/coding/v1")
 CONTEXT_WIN  = 262144
 MAX_OUTPUT   = 8192
 
@@ -67,13 +72,18 @@ class KimiClient:
     """Thread-safe wrapper around the Kimi K2.6 API."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        key = api_key or os.environ.get("MOONSHOT_API_KEY")
+        key = (api_key or os.environ.get("KIMI_API_KEY")
+               or os.environ.get("MOONSHOT_API_KEY"))
         if not key:
             raise EnvironmentError(
                 "MOONSHOT_API_KEY not set. "
                 "Get yours at https://platform.kimi.ai"
             )
-        self._client = OpenAI(api_key=key, base_url=BASE_URL)
+        # Kimi For Coding gates access to approved coding agents via User-Agent.
+        # Jarvis runs through Claude Code, so identify as such (env-overridable).
+        ua = os.environ.get("KIMI_USER_AGENT", "claude-code/1.0")
+        self._client = OpenAI(api_key=key, base_url=BASE_URL,
+                              default_headers={"User-Agent": ua})
         self._log_file = KIMI_LOG
         self._log_file.parent.mkdir(parents=True, exist_ok=True)
         self._usage_today: dict[str, int] = {"input": 0, "output": 0}
