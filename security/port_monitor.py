@@ -63,23 +63,29 @@ class PortMonitor:
                 ["ss", "-tlnp", "-H"],
                 capture_output=True, text=True, timeout=15,
             ).stdout
-            for line in out.strip().splitlines():
+        except Exception as exc:
+            logger.error("ss snapshot failed: %s", exc)
+            return results
+
+        for line in out.strip().splitlines():
+            # Parse each line independently so one malformed row (e.g. a
+            # wildcard '*:*' port) never aborts the whole snapshot.
+            try:
                 parts = line.split()
                 if len(parts) < 5:
                     continue
                 proto = parts[0]
-                state = parts[1]
-                recv_q = parts[2]
-                send_q = parts[3]
                 local = parts[4]
                 process = parts[5] if len(parts) > 5 else ""
 
                 if "[" in local and "]" in local:
-                    # IPv6
-                    addr, port_str = local.rsplit(":", 1)
+                    addr, port_str = local.rsplit(":", 1)  # IPv6
                     addr = addr.strip("[]")
                 else:
                     addr, port_str = local.rsplit(":", 1)
+
+                if not port_str.isdigit():
+                    continue  # wildcard/unknown port — skip
 
                 pid_name = self._parse_process(process)
                 results.append({
@@ -89,8 +95,8 @@ class PortMonitor:
                     "process_name": pid_name["name"],
                     "pid": pid_name["pid"],
                 })
-        except Exception as exc:
-            logger.error("ss snapshot failed: %s", exc)
+            except Exception as exc:
+                logger.debug("skipping unparseable ss line %r: %s", line, exc)
         return results
 
     def _parse_process(self, proc_field: str) -> dict:
