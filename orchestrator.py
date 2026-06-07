@@ -33,6 +33,8 @@ class OrchestratorResult:
     tasks_completed: int = 0
     tasks_failed: int = 0
     needs_approval: Optional[str] = None
+    permission_request_id: str = ""
+    permission_keyboard: List[dict] = field(default_factory=list)
     elapsed_sec: float = 0.0
 
 
@@ -56,6 +58,14 @@ class Orchestrator:
         self.intent_classifier = IntentClassifier()
         self.decomposer = TaskDecomposer()
         self.brain_router = None  # Lazy import to avoid circular deps
+
+        # Progressive-trust permission handler (shared across the process so the
+        # API can resolve button presses that arrive via the Telegram bot).
+        from telegram_ui.callbacks import PermissionCallbackHandler
+        self.permission_handler = PermissionCallbackHandler(
+            trust_registry=self.trust_registry,
+            executor=self._execute_approved,
+        )
 
         # Swarm
         self.queue = PriorityTaskQueue()
