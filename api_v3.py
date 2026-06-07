@@ -458,6 +458,47 @@ def memory_query(q: str, n: int = 8, x_api_key: str = Header(default=None)):
         return {"query": q, "chunks": [], "error": str(exc)}
 
 
+# ── Legacy v2 endpoint graft ────────────────────────────────────────
+# The Telegram bot still depends on a set of v2 endpoints (/index, /stats,
+# /sysinfo, /agent, /query, /approve, /deny, /learning-stats, /memory/save,
+# /probe, /recall, /selfcheck, /skills, /voice/notify, …). The v3 cutover
+# only reimplemented a subset, so those calls were 404ing. We graft the
+# archived v2 app's routes onto this app for any path v3 doesn't already
+# define — v3 routes keep precedence (they're registered first). Transitional
+# until each endpoint is ported natively to v3.
+def _graft_legacy_v2_routes() -> int:
+    import importlib.util
+    import sys as _sys
+    v2_path = JARVIS_HOME / ".v2_archive" / "api_v2.py"
+    if not v2_path.exists():
+        log.warning("Legacy v2 archive not found at %s; bot endpoints may 404", v2_path)
+        return 0
+    spec = importlib.util.spec_from_file_location("jarvis_api_v2_legacy", v2_path)
+    v2 = importlib.util.module_from_spec(spec)
+    _sys.modules["jarvis_api_v2_legacy"] = v2
+    spec.loader.exec_module(v2)
+    existing = {(r.path, m) for r in app.routes
+                for m in getattr(r, "methods", None) or []}
+    grafted = 0
+    for r in v2.app.routes:
+        methods = getattr(r, "methods", None)
+        if not methods:
+            continue  # skip docs/openapi/static
+        # Never override a v3 route; skip health (v3 owns it).
+        if r.path == "/health" or all((r.path, m) in existing for m in methods):
+            continue
+        app.router.routes.append(r)
+        grafted += 1
+    return grafted
+
+
+try:
+    _n = _graft_legacy_v2_routes()
+    log.info("Grafted %d legacy v2 routes onto v3 app", _n)
+except Exception as _exc:  # noqa: BLE001
+    log.error("Could not graft legacy v2 routes: %s", _exc)
+
+
 # ── Main ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
