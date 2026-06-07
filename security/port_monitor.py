@@ -71,11 +71,12 @@ class PortMonitor:
             # Parse each line independently so one malformed row (e.g. a
             # wildcard '*:*' port) never aborts the whole snapshot.
             try:
+                # ss -tlnp -H columns: State Recv-Q Send-Q Local:Port Peer:Port [process]
                 parts = line.split()
                 if len(parts) < 5:
                     continue
-                proto = parts[0]
-                local = parts[4]
+                proto = "tcp"               # -t restricts to TCP
+                local = parts[3]            # local listen addr:port (NOT peer)
                 process = parts[5] if len(parts) > 5 else ""
 
                 if "[" in local and "]" in local:
