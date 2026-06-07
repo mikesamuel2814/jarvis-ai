@@ -12,7 +12,6 @@ from typing import Dict, List, Optional
 
 from models.tier import BrainTier
 from nano_swarm.task_queue import PriorityTaskQueue, Task, Priority
-from nano_swarm.worker_pool import WorkerPool
 from nano_swarm.blackboard import Blackboard
 from nano_swarm.gossip import GossipBus
 from security.scope_enforcer import ScopeEnforcer, ScopeLevel
@@ -91,12 +90,9 @@ class Orchestrator:
             tool_registry=self.tools,
         )
 
-        self.worker_pool = WorkerPool(
-            queue=self.queue,
-            blackboard=self.blackboard,
-            worker_count=worker_count,
-            tool_executor=self._execute_tool,
-        )
+        # Worker pool is available for background/long-running task queues;
+        # the orchestrator uses asyncio.gather for immediate per-request
+        # dispatch (lower latency, no worker startup cost).
 
     async def _raw_execute_tool(self, tool_name: str, params: dict) -> dict:
         """Low-level tool execution (called by bots after the Guard gate)."""
