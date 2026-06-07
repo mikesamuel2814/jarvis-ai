@@ -203,6 +203,12 @@ class AskRequest(BaseModel):
     system_prompt: str = ""
 
 
+class AgentRequest(BaseModel):
+    task: str
+    max_steps: int = 6
+    allow_destructive: bool = False
+
+
 # ── Health ──────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -397,6 +403,24 @@ async def ask(req: AskRequest, x_api_key: str = Header(default=None)):
         "reasoning": resp.reasoning,
         "latency_ms": round(resp.latency_ms),
     }
+
+
+@app.post("/agent")
+async def agent_endpoint(req: AgentRequest, x_api_key: str = Header(default=None)):
+    """Autonomous agent endpoint — plans, executes tools, and synthesizes answers.
+    Delegates to jarvis_agent_v3.run_agent_v3()."""
+    require_api_key(x_api_key)
+    try:
+        from jarvis_agent_v3 import run_agent_v3
+        result = await run_agent_v3(
+            task=req.task,
+            max_steps=req.max_steps,
+            allow_destructive=req.allow_destructive,
+        )
+        return result
+    except Exception as exc:
+        log.exception("Agent endpoint failed")
+        raise HTTPException(status_code=500, detail=f"Agent failed: {exc}")
 
 
 # ── v3 Guardian ─────────────────────────────────────────────────────

@@ -87,6 +87,10 @@ class TrustRegistry:
         presets = [
             ("service_restart", {"service": "jarvis"}, "R3", 180),
             ("service_restart", {"service": "nginx"}, "R3", 180),
+            ("service_restart", {"service": "ollama"}, "R3", 180),
+            ("service_restart", {"service": "openclaw"}, "R3", 180),
+            ("pm2_restart", {"name": "gateway"}, "R3", 180),
+            ("pm2_restart", {"name": "starline"}, "R3", 180),
             ("git_commit", {"auto_push": False}, "R2", 90),
         ]
         for tool, params, rank, days in presets:
