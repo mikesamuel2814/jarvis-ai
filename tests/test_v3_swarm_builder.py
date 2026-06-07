@@ -169,10 +169,21 @@ def test_notifier():
     n = Notifier()
     check("GENERAL suppressed", n.notify("x", Level.GENERAL, dry_run=True) is False)
     check("NORMAL suppressed", n.notify("x", Level.NORMAL, dry_run=True) is False)
-    check("MEDIUM delivered", n.notify("ok", Level.MEDIUM, "success", dry_run=True) is True)
+    check("MEDIUM suppressed (HIGH-only policy)",
+          n.notify("routine", Level.MEDIUM, "success", dry_run=True) is False)
     check("HIGH delivered", n.notify("bad", Level.HIGH, "failure", dry_run=True) is True)
-    check("duplicate suppressed",
-          n.notify("ok", Level.MEDIUM, "success", dry_run=True) is False)
+    check("CRITICAL delivered",
+          n.notify("down", Level.CRITICAL, "security", dry_run=True) is True)
+    check("duplicate HIGH suppressed",
+          n.notify("bad", Level.HIGH, "failure", dry_run=True) is False)
+    # Autonomous-event helpers must classify at HIGH so they reach Sir.
+    n2 = Notifier()
+    n2._send = lambda text: n2.__dict__.setdefault("_last", text)  # capture, no HTTP
+    check("bot_request delivered (HIGH)", n2.bot_request("docker_logs") is True)
+    n2._recent.clear()
+    check("remediation delivered (HIGH)", n2.remediation("restart ollama", True) is True)
+    n2._recent.clear()
+    check("routine success suppressed", n2.success("disk read") is False)
     os.environ["JARVIS_NOTIFY_DISABLED"] = "1"
     check("kill-switch suppresses all",
           n.notify("anything", Level.CRITICAL, dry_run=True) is False)

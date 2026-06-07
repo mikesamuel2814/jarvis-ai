@@ -234,10 +234,16 @@ class ToolBuilder:
             r.deployed_path = self.deploy(spec["name"], code, spec,
                                           r.security, r.test)
         r.phase, r.success = "deployed", True
-        # MEDIUM: new tool successfully built & deployed by Jarvis.
-        self._notify("success", f"new tool: {spec['name']}",
-                     f"{spec['rank']}/{spec['scope']} via {r.provider or 'synth'} → "
-                     f"{'deployed' if deploy else 'validated'}", "tool_builder")
+        # HIGH: a new tool/capability was autonomously built & deployed.
+        try:
+            from notifier import get_notifier, Level
+            get_notifier().success(
+                f"new tool: {spec['name']}",
+                f"{spec['rank']}/{spec['scope']} via {r.provider or 'synth'} → "
+                f"{'deployed' if deploy else 'validated'}",
+                "tool_builder", level=Level.HIGH)
+        except Exception:  # noqa: BLE001
+            pass
         return r
 
 

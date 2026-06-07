@@ -12,9 +12,13 @@ actions, remediation). GENERAL / NORMAL chatter is suppressed.
   ─────────  ─────  ───────────────────────────────────────────────
   GENERAL    no     routine reads, heartbeat, debug
   NORMAL     no     ordinary command completed, status checks
-  MEDIUM     yes    tool/build success, new bot request, auto-action
-  HIGH       yes    failure, blocked privileged action, remediation
+  MEDIUM     no     routine tool success, benign auto-action
+  HIGH       yes    new bot request, failure, blocked privileged
+                    action, autonomous remediation/decision, approval
   CRITICAL   yes    production down, security event, destructive halt
+
+Policy: notify on HIGH and above only (per Sir). Genuinely significant
+autonomous events are classified HIGH; routine MEDIUM-and-below stays silent.
 
 Config source: config/secrets.env → TELEGRAM_BOT_TOKEN + TELEGRAM_USER_ID.
 Sends are non-blocking (daemon thread) and never raise into the caller.
@@ -42,8 +46,8 @@ class Level(IntEnum):
     CRITICAL = 4
 
 
-# Only MEDIUM and above are delivered.
-SEND_THRESHOLD = Level.MEDIUM
+# Only HIGH and above are delivered (Sir's policy).
+SEND_THRESHOLD = Level.HIGH
 
 _EMOJI = {
     Level.MEDIUM: "🔔",
@@ -111,19 +115,23 @@ class Notifier:
         return True
 
     # ── Convenience helpers (event kinds) ────────────────────────────────────
-    def success(self, what: str, detail: str = "", source: str = "jarvis"):
+    def success(self, what: str, detail: str = "", source: str = "jarvis",
+                level: Level = Level.MEDIUM):
+        # Routine success is MEDIUM (silent). Callers pass level=HIGH for
+        # significant outcomes (e.g. a new tool/capability deployed).
         return self.notify(f"*{what}* succeeded" + (f"\n{detail}" if detail else ""),
-                           Level.MEDIUM, "success", source)
+                           level, "success", source)
 
     def failure(self, what: str, detail: str = "", source: str = "jarvis"):
         return self.notify(f"*{what}* failed" + (f"\n{detail}" if detail else ""),
                            Level.HIGH, "failure", source)
 
     def bot_request(self, name: str, detail: str = "", source: str = "tool_builder"):
+        # Jarvis autonomously creating a new bot/tool is a significant decision.
         return self.notify(f"New bot/tool request: *{name}*" + (f"\n{detail}" if detail else ""),
-                           Level.MEDIUM, "bot_request", source)
+                           Level.HIGH, "bot_request", source)
 
-    def decision(self, what: str, detail: str = "", level: Level = Level.MEDIUM,
+    def decision(self, what: str, detail: str = "", level: Level = Level.HIGH,
                  source: str = "jarvis"):
         return self.notify(f"Decision: *{what}*" + (f"\n{detail}" if detail else ""),
                            level, "decision", source)
@@ -133,10 +141,11 @@ class Notifier:
                            Level.HIGH, "blocked", source)
 
     def remediation(self, what: str, ok: bool, detail: str = "", source: str = "guardian"):
-        lvl = Level.HIGH if not ok else Level.MEDIUM
+        # An autonomous remediation (success or failure) is always HIGH —
+        # Jarvis took action on the system without asking.
         verb = "applied" if ok else "attempted"
         return self.notify(f"Auto-remediation {verb}: *{what}*" + (f"\n{detail}" if detail else ""),
-                           lvl, "remediation", source)
+                           Level.HIGH, "remediation", source)
 
     def critical(self, message: str, kind: str = "security", source: str = "jarvis"):
         return self.notify(message, Level.CRITICAL, kind, source)
