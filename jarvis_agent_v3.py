@@ -128,8 +128,15 @@ async def run_agent_v3(
         }
 
     # 5. Post-process answer with BrainRouter if synthesis looks thin
+    # If the orchestrator produced no actionable steps, always re-route through
+    # BrainRouter so casual chat / greetings get a natural response.
     answer = result.answer
-    if not answer or len(answer) < 20:
+    has_no_steps = not result.steps
+    looks_like_fallback = (
+        "couldn't gather" in (answer or "") or
+        "no information" in (answer or "").lower()
+    )
+    if not answer or len(answer) < 20 or (has_no_steps and looks_like_fallback):
         answer = await _synthesize_v3(task, result.steps, thinking_ctx, tier_name)
 
     actions_run = [s.get("tool", s.get("task", "?")) for s in result.steps if s.get("tool")]
@@ -150,25 +157,38 @@ async def run_agent_v3(
 
 
 async def _synthesize_v3(task: str, steps: list, thinking_ctx: str, tier_name: str) -> str:
-    """Use BrainRouter to synthesize a professional answer from step outputs."""
-    if not steps:
-        return "Sir, I couldn't gather enough to answer that. Try rephrasing the task."
-
-    context = "\n\n".join(
-        f"[{s.get('tool', s.get('task', '?'))}]\n{str(s.get('result', {}).get('output', ''))[:600]}"
-        for s in steps
-    )
-    prompt = (
-        f"Task: {task}\n\n"
-        f"Gathered data:\n{context}\n\n"
-        f"Write the final answer for Sir. Start with 'Sir,'. Be concise, factual, professional."
-    )
-    if thinking_ctx:
-        prompt = f"{thinking_ctx}\n\n{prompt}"
+    """Use BrainRouter to synthesize a professional answer from step outputs.
+    If no steps (e.g. casual chat), route the original task through the router
+    for a natural response instead of returning a generic failure message."""
 
     try:
         from brain_router import BrainRouter
         router = BrainRouter()
+
+        if not steps:
+            # Casual chat / greeting — route task directly as a conversation query
+            resp = await router.execute(
+                query=task,
+                context=thinking_ctx or "",
+                system_prompt="You are Jarvis, Sir Mike Samuel's personal AI assistant. Be warm, concise, and professional. Start with 'Sir,' when appropriate.",
+            )
+            ans = resp.content if hasattr(resp, "content") else str(resp)
+            import re
+            ans = re.sub(r"<think>.*?</think>", "", ans, flags=re.DOTALL).strip()
+            return ans if ans else f"Sir, I'm here and ready to assist you."
+
+        context = "\n\n".join(
+            f"[{s.get('tool', s.get('task', '?'))}]\n{str(s.get('result', {}).get('output', ''))[:600]}"
+            for s in steps
+        )
+        prompt = (
+            f"Task: {task}\n\n"
+            f"Gathered data:\n{context}\n\n"
+            f"Write the final answer for Sir. Start with 'Sir,'. Be concise, factual, professional."
+        )
+        if thinking_ctx:
+            prompt = f"{thinking_ctx}\n\n{prompt}"
+
         resp = await router.execute(
             query=prompt,
             context="",
@@ -180,7 +200,13 @@ async def _synthesize_v3(task: str, steps: list, thinking_ctx: str, tier_name: s
         return ans if ans else f"Sir, here's what I found:\n{context[:600]}"
     except Exception as exc:
         log.debug("Synthesis failed: %s", exc)
-        return f"Sir, here's what I found:\n{context[:600]}"
+        if steps:
+            context = "\n\n".join(
+                f"[{s.get('tool', s.get('task', '?'))}]\n{str(s.get('result', {}).get('output', ''))[:600]}"
+                for s in steps
+            )
+            return f"Sir, here's what I found:\n{context[:600]}"
+        return "Sir, I'm here and ready to assist you."
 
 
 def _log_run(task: str, steps: list, answer: str, needs_approval: Optional[str], tier: str) -> None:
