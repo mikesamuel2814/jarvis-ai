@@ -7,7 +7,10 @@ import uuid
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from .persona import JARVIS_PERSONA
+try:
+    from .persona import JARVIS_PERSONA
+except ImportError:
+    from persona import JARVIS_PERSONA
 
 JARVIS_DIR = Path("/home/kali/.jarvis")
 OUTPUT_DIR = JARVIS_DIR / "data" / "synthetic"
