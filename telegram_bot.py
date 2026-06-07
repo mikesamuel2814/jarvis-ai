@@ -2365,6 +2365,7 @@ def main():
     app_bot.add_handler(CommandHandler("approve", approve_cmd))
     app_bot.add_handler(CommandHandler("deny", deny_cmd))
     app_bot.add_handler(CommandHandler("task", task_cmd))
+    app_bot.add_handler(CommandHandler("orchestrate", orchestrate_cmd))
     app_bot.add_handler(CommandHandler("exec", exec_cmd))
     app_bot.add_handler(CommandHandler("web", web_cmd))
     app_bot.add_handler(CommandHandler("search", web_cmd))
