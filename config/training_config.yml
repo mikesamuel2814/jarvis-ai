@@ -1,0 +1,86 @@
+# JARVIS v3 Base Model Training Configuration
+# Optimized for RTX 3050 6GB VRAM
+
+# Model paths
+base_model_hf: "Qwen/Qwen2.5-7B-Instruct"
+base_model_local: "/home/kali/.jarvis/models/base/qwen2.5-7b-instruct"
+ollama_model: "qwen2.5:7b"
+
+# Output paths
+checkpoint_dir: "/home/kali/.jarvis/models/checkpoints"
+sft_output: "/home/kali/.jarvis/models/checkpoints/jarvis-sft"
+dpo_output: "/home/kali/.jarvis/models/checkpoints/jarvis-dpo"
+merged_output: "/home/kali/.jarvis/models/final/jarvis-main"
+
+# Dataset paths
+raw_data_dir: "/home/kali/.jarvis/data/synthetic"
+formatted_data_dir: "/home/kali/.jarvis/data/formatted"
+
+# Training hyperparameters (6GB VRAM optimized)
+training:
+  # QLoRA
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+  # LoRA
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  lora_bias: "none"
+  lora_target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # MLP layers commented out to save VRAM during training
+    # - gate_proj
+    # - up_proj
+    # - down_proj
+
+  # Training
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  lr_scheduler_type: "cosine"
+  max_seq_length: 512
+  gradient_checkpointing: true
+  fp16: true
+  bf16: false
+  tf32: false
+  optim: "paged_adamw_8bit"
+  max_grad_norm: 0.3
+  group_by_length: false
+  save_strategy: "steps"
+  save_steps: 200
+  eval_strategy: "steps"
+  eval_steps: 100
+  logging_steps: 10
+  save_total_limit: 3
+  load_best_model_at_end: false
+  remove_unused_columns: false
+  report_to: "none"
+  seed: 42
+
+# DPO specific
+dpo:
+  beta: 0.1
+  num_train_epochs: 2
+  learning_rate: 5.0e-5
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  max_seq_length: 512
+  gradient_checkpointing: true
+
+# System prompt for JARVIS
+system_prompt: |
+  You are JARVIS (Just A Rather Very Intelligent System), an advanced AI assistant running on Kali Linux.
+  You help with cybersecurity, system administration, coding, and general tasks.
+  When appropriate, you use tools to interact with the system.
+  You prioritize safety and never execute destructive commands without explicit user confirmation.
+  You communicate clearly, concisely, and professionally.
