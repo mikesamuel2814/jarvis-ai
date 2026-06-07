@@ -39,3 +39,10 @@
 2026-06-07 04:45:01,808 | [FAIL] action=GET key=api_key tool=bad_tool session=local access_denied
 2026-06-07 04:45:01,854 | [OK] action=SET key=db_pass tool=vault_cli session=local 
 2026-06-07 04:45:01,897 | [OK] action=GET key=db_pass tool=unknown session=local 
+2026-06-07 12:31:45,609 | [OK] action=SET key=test_key tool=test_tool session=local 
+2026-06-07 12:31:45,649 | [OK] action=GET key=test_key tool=test_tool session=local 
+2026-06-07 12:31:45,693 | [OK] action=SET key=api_key tool=vault_cli session=local 
+2026-06-07 12:31:45,733 | [OK] action=GET key=api_key tool=allowed_tool session=local 
+2026-06-07 12:31:45,736 | [FAIL] action=GET key=api_key tool=bad_tool session=local access_denied
+2026-06-07 12:31:45,781 | [OK] action=SET key=db_pass tool=vault_cli session=local 
+2026-06-07 12:31:45,820 | [OK] action=GET key=db_pass tool=unknown session=local 

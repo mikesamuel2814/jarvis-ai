@@ -245,6 +245,16 @@ def list_tools(category: Optional[str] = None, x_api_key: str = Header(default=N
     return {"tools": tools, "count": len(tools)}
 
 
+# NOTE: this static route MUST be declared before /v3/tools/{tool_name},
+# otherwise FastAPI matches "search" as a tool_name and returns 404.
+@app.get("/v3/tools/search")
+def search_tools(q: str, n: int = 10, x_api_key: str = Header(default=None)):
+    require_api_key(x_api_key)
+    reg = get_tool_registry()
+    results = reg.find_tools(q, n=n)
+    return {"query": q, "results": results}
+
+
 @app.get("/v3/tools/{tool_name}")
 def get_tool(tool_name: str, x_api_key: str = Header(default=None)):
     require_api_key(x_api_key)
@@ -267,14 +277,6 @@ def execute_tool(tool_name: str, req: ToolExecuteRequest, x_api_key: str = Heade
         "error": result.error,
         "duration_ms": result.duration_ms,
     }
-
-
-@app.get("/v3/tools/search")
-def search_tools(q: str, n: int = 10, x_api_key: str = Header(default=None)):
-    require_api_key(x_api_key)
-    reg = get_tool_registry()
-    results = reg.find_tools(q, n=n)
-    return {"query": q, "results": results}
 
 
 # ── v3 Orchestrator ─────────────────────────────────────────────────
