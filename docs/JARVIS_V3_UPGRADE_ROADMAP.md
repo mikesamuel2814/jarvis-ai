@@ -102,18 +102,23 @@ Two parallel approval systems create security gaps. v2 tiers (AUTO/CONFIRM/APPRO
 - `skillset.py` — sync approval_counts with TrustRegistry
 
 ### Steps
-1. [ ] Create `autonomy_v3.py` wrapper that maps old API to new security modules
-2. [ ] Add rank-to-tier mapping in `tools/compat.py`
-3. [ ] Update `telegram_bot.py` to use `PermissionCallbackHandler`
-4. [ ] Sync `skillset.json` approval_counts → TrustRegistry
-5. [ ] Test: R0 action auto-runs, R2+ action pauses for approval
-6. [ ] Test: "Allow & Save" persists trust pattern
+1. [x] Create `autonomy_v3.py` wrapper that maps old API to new security modules
+2. [x] Add rank-to-tier mapping in `tools/compat.py`
+3. [x] Update `telegram_bot.py` to use `PermissionCallbackHandler`
+4. [x] Sync `skillset.json` approval_counts → TrustRegistry
+5. [x] Test: R0 action auto-runs, R2+ action pauses for approval
+6. [x] Test: "Allow & Save" persists trust pattern
 
 ### Verification
-- v2 action `/action {"action":"disk"}` returns R0, auto-runs
-- v2 action `/action {"action":"reboot"}` returns R3+, pauses
-- v3 tool `service_restart` with R3 rank pauses for approval
-- Telegram button flow works end-to-end
+- v2 action `/action {"action":"disk"}` returns R0, auto-runs ✅
+- v2 action `/action {"action":"reboot"}` returns R3+, pauses ✅
+- v3 tool `service_restart` with R3 rank pauses for approval ✅
+- Telegram button flow works end-to-end ✅
+
+**Status: COMPLETE** — Verified 2026-06-07. `autonomy.py` delegates to `autonomy_v3.py`;
+`/action` and `/v3/tools/{tool}/execute` endpoints gate through `_check_autonomy()`;
+orchestrator scope escalation moved before trust gate so pre-trusted destructive
+actions auto-run when `allow_destructive=True`. 
 
 ---
 

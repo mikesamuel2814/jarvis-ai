@@ -153,6 +153,8 @@ class Orchestrator:
         # Escalate scope BEFORE the gate if destructive actions are allowed,
         # so pre-trusted tools can auto-run.
         if allow_destructive:
+            self.scope_enforcer.escalate(
+                ScopeLevel.PRIVILEGED, "orchestrator allow_destructive run")
         paused_task = None
         paused_rank = "R2"
         for st in subtasks:
