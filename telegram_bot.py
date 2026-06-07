@@ -2098,21 +2098,29 @@ def main():
             lines = [f"🌟 {bold('JV Titan Status')}\n"]
             # Growth
             growth = jv_titan.get_growth_state()
-            lines.append(f"  {bold('Level')} {code(str(growth.get('level', 1)))} / 100")
-            lines.append(f"  {bold('XP')} {code(f\"{growth.get('total_xp', 0):,}\")}")
-            lines.append(f"  {bold('Milestones')} {code(str(len(growth.get('milestones_achieved', []))))}")
+            lvl = growth.get('level', 1)
+            xp = growth.get('total_xp', 0)
+            ms = len(growth.get('milestones_achieved', []))
+            lines.append(f"  {bold('Level')} {code(str(lvl))} / 100")
+            lines.append(f"  {bold('XP')} {code(str(xp))}")
+            lines.append(f"  {bold('Milestones')} {code(str(ms))}")
             # Consciousness
             cs = jv_titan.get_consciousness_state()
-            lines.append(f"\n  {bold('Awareness')} {code(f\"{cs.get('awareness_level', 0):.0%}\")}")
-            lines.append(f"  {bold('Interactions')} {code(str(cs.get('total_interactions', 0)))}")
-            lines.append(f"  {bold('Wake cycles')} {code(str(cs.get('wake_cycles', 0)))}")
+            aw = cs.get('awareness_level', 0)
+            inter = cs.get('total_interactions', 0)
+            wc = cs.get('wake_cycles', 0)
+            lines.append(f"\n  {bold('Awareness')} {code(str(int(aw*100)) + '%')}")
+            lines.append(f"  {bold('Interactions')} {code(str(inter))}")
+            lines.append(f"  {bold('Wake cycles')} {code(str(wc))}")
             # Emotion
             em = jv_titan.get_emotion_state()
-            lines.append(f"\n  {bold('Mood')} {code(em.get('current_mood', 'calm'))}")
-            lines.append(f"  {bold('Mike valence')} {code(f\"{em.get('mike_valence', 0):+.2f}\")}")
+            mood = em.get('current_mood', 'calm')
+            mv = em.get('mike_valence', 0)
+            lines.append(f"\n  {bold('Mood')} {code(mood)}")
+            lines.append(f"  {bold('Mike valence')} {code(str(mv))}")
             # Decision
             tier_level, tier_name = jv_titan.get_autonomy_tier()
-            lines.append(f"\n  {bold('Autonomy')} {code(f'Tier {tier_level}: {tier_name}')}")
+            lines.append(f"\n  {bold('Autonomy')} {code('Tier ' + str(tier_level) + ': ' + tier_name)}")
             # Persona
             style = jv_titan.get_communication_style()
             lines.append(f"\n  {bold('Communication')} {code(style)}")
