@@ -174,7 +174,7 @@ async def _synthesize_v3(task: str, steps: list, thinking_ctx: str, tier_name: s
             context="",
             system_prompt="You are Jarvis, Sir Mike Samuel's AI assistant. Be concise and factual.",
         )
-        ans = resp.text if hasattr(resp, "text") else str(resp)
+        ans = resp.content if hasattr(resp, "content") else str(resp)
         import re
         ans = re.sub(r"<think>.*?</think>", "", ans, flags=re.DOTALL).strip()
         return ans if ans else f"Sir, here's what I found:\n{context[:600]}"
