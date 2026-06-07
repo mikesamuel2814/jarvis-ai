@@ -321,32 +321,36 @@ def query_jarvis(uid: int, text: str) -> tuple[str, str | None]:
         return ver, None
 
     history = get_history(uid)
+    # v3: route ALL chat through the autonomous /agent endpoint.
+    # The v3 agent handles intent classification, tool selection, scope/trust
+    # gating, and synthesis — replacing the old /query + /claude-plan split.
     payload = {
-        "query": text,
-        "context_results": 5,
+        "task": text,
+        "max_steps": 6,
+        "allow_destructive": False,
         "history": history,
     }
 
-    # Route through Claude planner for non-casual messages that may need actions.
-    # Casual chat goes straight to /query (faster, no Claude overhead).
-    endpoint = "/query" if _is_casual(text) else "/claude-plan"
-
     try:
-        resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
+        resp = requests.post(f"{API_BASE}/agent", json=payload, headers=_ah(), timeout=180)
         # Retry once on 503 — model may still be loading.
-        # Only retry if the response body is empty/non-JSON (i.e. server not ready),
-        # NOT if we already got a valid LLM response (avoids sending the same answer twice).
         if resp.status_code == 503:
             try:
-                resp.json()  # if this succeeds, we already have a response — don't retry
+                resp.json()
             except Exception:
                 import time
                 time.sleep(8)
-                resp = requests.post(f"{API_BASE}{endpoint}", json=payload, headers=_ah(), timeout=180)
+                resp = requests.post(f"{API_BASE}/agent", json=payload, headers=_ah(), timeout=180)
         resp.raise_for_status()
         data = resp.json()
-        answer = data.get("response", "No response received.")
-        # Hard cap: prevent looping model responses from spamming Telegram with dozens of chunks.
+        answer = data.get("answer", "No response received.")
+        # If the agent paused for approval, surface the message it prepared.
+        if data.get("needs_approval") and not answer:
+            answer = (
+                f"Sir, to finish this I need your approval to run *{data['needs_approval']}*. "
+                "Use /do if you want me to handle it, or /pending to see open requests."
+            )
+        # Hard cap: prevent looping model responses from spamming Telegram.
         if len(answer) > MAX_RESPONSE_CHARS:
             log.warning(
                 "query_jarvis: response truncated from %d to %d chars (looping model?)",
@@ -2250,13 +2254,19 @@ def main():
 
         # Fix 3: Short unrecognised plain-text messages with no clear intent →
         # respond with a helpful nudge rather than guessing and firing a wrong action.
+        # v3 update: let greetings and direct addresses through to the agent.
         _QUERY_WORDS = {"what", "why", "how", "where", "when", "who", "which", "is", "are",
                         "can", "could", "should", "does", "do", "will", "show", "tell", "?"}
+        _GREETING_WORDS = {"hello", "hi", "hey", "good", "morning", "evening", "night",
+                           "jarvis", "thanks", "thank", "ok", "okay", "yes", "no", "great",
+                           "awesome", "nice", "cool", "welcome", "bye", "goodbye"}
+        _words = set(text.lower().split())
         if (
             not action
             and len(text.split()) <= 2
             and "?" not in text
-            and not set(text.lower().split()) & _QUERY_WORDS
+            and not _words & _QUERY_WORDS
+            and not _words & _GREETING_WORDS
         ):
             await send(update,
                 "I didn't catch that, Sir. Try a question, a /command, or /actions for the full list.")
