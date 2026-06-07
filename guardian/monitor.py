@@ -109,12 +109,13 @@ class GuardianMonitor:
         return alerts
 
     def check_security_posture(self) -> List[dict]:
-        # Lightweight: check auth.log for failed SSH
+        # Count failed SSH logins in the LAST HOUR (not all-time, which would
+        # always trip the per-hour threshold on a long-lived auth.log).
         alerts = []
         try:
             result = subprocess.run(["grep", "Failed password", "/var/log/auth.log"],
                                     capture_output=True, text=True, timeout=5)
-            count = len(result.stdout.strip().splitlines())
+            count = self._count_recent_failures(result.stdout)
             if count > self.thresholds.get("ssh_failures_per_hour", 10):
                 alerts.append({
                     "dimension": "security_posture",
@@ -126,6 +127,44 @@ class GuardianMonitor:
         except Exception:
             pass
         return alerts
+
+    def _count_recent_failures(self, grep_output: str, window_min: int = 60) -> int:
+        """Count auth.log 'Failed password' lines within the last window_min
+        minutes. Handles ISO and traditional syslog timestamps; if a line's
+        time can't be parsed it is conservatively counted."""
+        now = datetime.now()
+        cutoff = now.timestamp() - window_min * 60
+        count = 0
+        for line in grep_output.strip().splitlines():
+            ts = self._parse_log_time(line, now)
+            if ts is None or ts >= cutoff:
+                count += 1
+        return count
+
+    @staticmethod
+    def _parse_log_time(line: str, now: datetime) -> Optional[float]:
+        import re
+        # ISO: 2026-06-07T07:33:03 or 2026-06-07 07:33:03
+        m = re.match(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", line)
+        if m:
+            try:
+                return datetime.strptime(f"{m.group(1)} {m.group(2)}",
+                                         "%Y-%m-%d %H:%M:%S").timestamp()
+            except ValueError:
+                return None
+        # Traditional syslog: "Jun  7 07:33:03" (no year → assume current).
+        m = re.match(r"([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})", line)
+        if m:
+            try:
+                dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)} {now.year}",
+                                       "%b %d %H:%M:%S %Y")
+                # Handle year wrap (Dec log read in Jan).
+                if dt.timestamp() > now.timestamp() + 86400:
+                    dt = dt.replace(year=now.year - 1)
+                return dt.timestamp()
+            except ValueError:
+                return None
+        return None
 
     def check_port_anomalies(self) -> List[dict]:
         # Delegate to PortMonitor from security module

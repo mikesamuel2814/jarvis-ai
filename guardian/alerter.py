@@ -58,8 +58,26 @@ class Alerter:
         if actions:
             text += f"\n\nActions: {', '.join(actions)}"
 
-        # TODO: Integrate with Telegram bot sender
         log.warning("ALERT [%s] %s: %s", severity.value, title, message[:200])
+
+        # Deliver via the unified notifier. Guardian severities map onto the
+        # notify levels; P3/P4 (LOW/INFO) stay below the MEDIUM send threshold.
+        try:
+            from notifier import get_notifier, Level
+            level_map = {
+                Severity.P0_CRITICAL: Level.CRITICAL,
+                Severity.P5_SECURITY: Level.CRITICAL,
+                Severity.P1_HIGH: Level.HIGH,
+                Severity.P2_MEDIUM: Level.MEDIUM,
+                Severity.P6_PERFORMANCE: Level.MEDIUM,
+                Severity.P3_LOW: Level.NORMAL,
+                Severity.P4_INFO: Level.GENERAL,
+            }
+            get_notifier().notify(f"*{title}*\n{message}",
+                                  level_map.get(severity, Level.MEDIUM),
+                                  kind="decision", source="guardian")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Notifier delivery failed: %s", exc)
         return True
 
     def clear_cache(self):
