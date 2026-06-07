@@ -32,6 +32,15 @@ class TaskDecomposer:
 
         # System info requests → single task
         if intent.category == IntentCategory.SYSTEM:
+            # Service control (restart/stop/start <svc>) → the real R3 tool, so it
+            # routes through the trust/permission gate instead of becoming advice.
+            svc = self._extract_service(ql)
+            if svc:
+                tasks.append(SubTask(
+                    id="t1", description=f"Restart service {svc}",
+                    tool_name="service_restart", params={"service": svc},
+                    scope="LOCAL"))
+                return tasks
             if any(k in ql for k in ["cpu", "processor"]):
                 tasks.append(SubTask(id="t1", description="Get CPU info", tool_name="cpu_info"))
             if any(k in ql for k in ["ram", "memory"]):
@@ -70,6 +79,30 @@ class TaskDecomposer:
             tasks.append(SubTask(id="t1", description=query, tool_name=None))
 
         return tasks
+
+    # Known service units Jarvis manages, matched by name anywhere in the query.
+    _KNOWN_SERVICES = (
+        "jarvis-telegram", "jarvis", "nginx", "ollama", "postgresql",
+        "postgres", "docker", "ssh", "sshd", "pm2", "anydesk", "tailscaled",
+    )
+    _SERVICE_VERB = re.compile(r"\b(restart|reboot|stop|start|reload)\b")
+
+    def _extract_service(self, ql: str) -> Optional[str]:
+        """Parse a service name from a control request, else None.
+        Requires both a control verb and a recognisable service target so plain
+        info queries ('start menu', 'cpu load') don't trigger it."""
+        if not self._SERVICE_VERB.search(ql):
+            return None
+        # 'reboot' alone (no service) is a host reboot — leave it to other paths.
+        for svc in self._KNOWN_SERVICES:
+            if re.search(rf"\b{re.escape(svc)}\b", ql):
+                return svc
+        # Fallback: "<verb> the <name> service" / "<verb> <name> service"
+        m = re.search(r"\b(?:restart|stop|start|reload)\b\s+(?:the\s+)?"
+                      r"([a-z0-9_.-]+)\s+service\b", ql)
+        if m:
+            return m.group(1)
+        return None
 
     def assign_tools(self, tasks: List[SubTask], available_tools: List[str]) -> List[SubTask]:
         """Assign the best matching tool to each sub-task."""

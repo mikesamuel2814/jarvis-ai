@@ -142,40 +142,39 @@ class Orchestrator:
         subtasks = self.decomposer.assign_tools(subtasks, available_tools)
         log.info("Decomposed into %d sub-tasks", len(subtasks))
 
-        # Step 3: Scope Validation
-        for st in subtasks:
-            meta = self.tools.get(st.tool_name or "")
-            scope = ScopeLevel.READ
-            if meta:
-                scope = ScopeLevel(meta.get("scope", "READ"))
-            if not self.scope_enforcer.check(st.tool_name or "unknown", scope):
-                result.answer = f"Sir, I cannot run *{st.tool_name}* because it exceeds the current session scope ({scope.value})."
-                result.elapsed_sec = time.time() - t0
-                return result
-
-        # Step 4: Trust Check
+        # Steps 3+4: Scope + Trust gate (unified).
+        # An action is auto-cleared only if it's within the session scope AND
+        # low-rank (R0/R1), or already trusted under allow_destructive. Anything
+        # that exceeds scope OR needs trust routes to the SAME approval pause —
+        # producing a Telegram button — rather than a silent hard-block. The
+        # pause never executes; only Sir pressing Allow does (via the handler,
+        # which bypasses the gate for that one approved call).
         paused_task = None
+        paused_rank = "R2"
         for st in subtasks:
             meta = self.tools.get(st.tool_name or "")
+            scope = ScopeLevel(meta.get("scope", "READ")) if meta else ScopeLevel.READ
             rank = meta.get("rank", "R0") if meta else "R0"
-            if rank in ("R0", "R1"):
-                continue  # Auto-run
-            if not allow_destructive:
-                paused_task = st
-                break
-            if not self.trust_registry.is_trusted(st.tool_name or "", st.params):
-                paused_task = st
-                break
+            scope_ok = self.scope_enforcer.can_execute(scope)
+            if scope_ok and rank in ("R0", "R1"):
+                continue  # Within scope + low rank → auto-run.
+            if scope_ok and allow_destructive and \
+                    self.trust_registry.is_trusted(st.tool_name or "", st.params):
+                continue  # Pre-trusted destructive run → auto-run.
+            paused_task = st
+            paused_rank = rank if rank not in ("R0", "R1") else (
+                "R3" if scope != ScopeLevel.READ else "R2")
+            break
 
         if paused_task:
             req = self.permission_engine.build_request(
                 tool_name=paused_task.tool_name or "",
                 command_display=str(paused_task.description),
-                rank=meta.get("rank", "R2") if meta else "R2",
+                rank=paused_rank,
             )
             # Register the pending permission so a Telegram button press (which
             # arrives in a different process, via the API) can resolve it.
-            rank = meta.get("rank", "R2") if meta else "R2"
+            rank = paused_rank
             pending = self.permission_handler.register(
                 tool_name=paused_task.tool_name or "",
                 params=paused_task.params,

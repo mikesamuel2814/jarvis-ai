@@ -212,7 +212,24 @@ def test_routing_feedback():
     check("no lesson stored without a collection", rf["lessons_added"] == 0)
 
 
+def test_decomposer_service():
+    print("[decomposer — service control routing]")
+    from thinking.decomposer import TaskDecomposer
+    from thinking.intent_classifier import IntentClassifier
+    d = TaskDecomposer()
+    ic = IntentClassifier()
+    check("restart maps to service_restart tool",
+          d._extract_service("restart the nginx service") == "nginx")
+    check("stop <svc> parsed", d._extract_service("stop ollama") == "ollama")
+    check("'start menu' is not a service", d._extract_service("what is the start menu") is None)
+    check("bare reboot is not a service", d._extract_service("reboot") is None)
+    subs = d.decompose("restart the nginx service", ic.classify("restart the nginx service"))
+    check("decompose emits service_restart with param",
+          subs[0].tool_name == "service_restart" and subs[0].params.get("service") == "nginx")
+
+
 async def main():
+    test_decomposer_service()
     await test_swarm()
     test_remedy()
     test_codegen()
