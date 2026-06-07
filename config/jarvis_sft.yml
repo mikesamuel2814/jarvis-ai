@@ -1,0 +1,85 @@
+# Axolotl SFT Configuration for JARVIS
+# Base model: DeepSeek-R1-Distill-Qwen-7B
+# Hardware: RTX 3050 6GB VRAM
+
+base_model: /home/kali/.jarvis/models/base/deepseek-r1-qwen-7b
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+
+load_in_8bit: false
+load_in_4bit: true
+adapter: lora
+lora_model_dir:
+
+sequence_len: 2048
+max_packed_sequence_len: 2048
+
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_linear: true
+lora_fan_in_fan_out: false
+lora_target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+  - gate_proj
+  - down_proj
+  - up_proj
+
+# Dataset
+datasets:
+  - path: /home/kali/.jarvis/data/synthetic/reasoning.jsonl
+    type: jsonl
+    field_instruction: instruction
+    field_output: answer
+  - path: /home/kali/.jarvis/data/synthetic/tools_file_read.jsonl
+    type: jsonl
+    field_instruction: instruction
+    field_output: expected_output
+
+# Training
+num_epochs: 3
+micro_batch_size: 1
+gradient_accumulation_steps: 8
+eval_batch_size: 1
+optimizer: adamw_bnb_8bit
+lr_scheduler: cosine
+learning_rate: 2.0e-4
+train_on_inputs: false
+group_by_length: false
+bf16: auto
+fp16: false
+tf32: false
+
+# Gradient checkpointing for 6GB VRAM
+gradient_checkpointing: true
+# Flash Attention (if available)
+flash_attention: true
+
+# Logging
+logging_steps: 10
+output_dir: /home/kali/.jarvis/models/checkpoints/jarvis-sft
+
+# Evaluation
+eval_steps: 100
+save_steps: 200
+save_total_limit: 3
+
+# WandB (optional)
+wandb_project:
+wandb_entity:
+wandb_watch:
+wandb_run_id:
+wandb_log_model:
+
+# Resume
+resume_from_checkpoint:
+
+# Sample generation during training
+sample:
+  prompt: "You are JARVIS, a helpful AI assistant. User: List running services. Assistant:"
+  num_samples: 1
+  max_new_tokens: 128
+  temperature: 0.7

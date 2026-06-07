@@ -1,0 +1,64 @@
+# Axolotl DPO Configuration for JARVIS
+# Aligns the SFT model with preference data
+
+base_model: /home/kali/.jarvis/models/checkpoints/jarvis-sft
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+
+# DPO specific
+rl: dpo
+chat_template: chatml
+
+# 4-bit for 6GB VRAM
+load_in_4bit: true
+adapter: lora
+
+sequence_len: 2048
+
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+  - gate_proj
+  - down_proj
+  - up_proj
+
+# Preference dataset
+datasets:
+  - path: /home/kali/.jarvis/data/processed/train_distilled.jsonl
+    type: jsonl
+    field_prompt: instruction
+    field_chosen: teacher_output
+    field_rejected: answer
+
+# DPO hyperparameters
+num_epochs: 2
+micro_batch_size: 1
+gradient_accumulation_steps: 8
+optimizer: adamw_bnb_8bit
+lr_scheduler: cosine
+learning_rate: 5.0e-5
+
+# Loss
+beta: 0.1
+
+# Gradient checkpointing
+gradient_checkpointing: true
+flash_attention: true
+
+# Logging & output
+logging_steps: 10
+output_dir: /home/kali/.jarvis/models/checkpoints/jarvis-dpo
+
+# Evaluation
+eval_steps: 50
+save_steps: 100
+save_total_limit: 3
+
+# WandB (optional)
+wandb_project:
+wandb_entity:
