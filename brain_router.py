@@ -31,6 +31,7 @@ class BrainRouter:
     def __init__(self):
         self._load_config()
         self._init_chroma()
+        self._dispatcher = None  # lazy — only built when execute() is called
 
     def _load_config(self):
         self.config = {}
@@ -196,6 +197,22 @@ class BrainRouter:
 
         self._log_decision(query, tier, confidence)
         return tier
+
+    @property
+    def dispatcher(self):
+        if self._dispatcher is None:
+            from models.clients import ModelDispatcher
+            self._dispatcher = ModelDispatcher()
+        return self._dispatcher
+
+    async def execute(self, query: str, context: str = "",
+                      history: Optional[List[dict]] = None,
+                      system_prompt: str = ""):
+        """Route the query to a tier and run it against a real model backend.
+        Returns the models.client.ModelResponse (with automatic fallback)."""
+        tier = self.route(query, history)
+        return await self.dispatcher.execute(
+            tier, query, context, history, system_prompt)
 
     def _log_decision(self, query: str, tier: BrainTier, confidence: float):
         entry = {

@@ -61,6 +61,26 @@ class Orchestrator:
         self.queue = PriorityTaskQueue()
         self.blackboard = Blackboard()
         self.gossip = GossipBus()
+
+        # Guard-gated bot dispatcher: every tool execution passes through the
+        # GuardBot (shares the orchestrator's scope enforcer + trust registry),
+        # then runs through the appropriate bot role.
+        from nano_swarm.bots import BotDispatcher, GuardBot
+        self._guard = GuardBot(
+            scope_enforcer=self.scope_enforcer,
+            trust_registry=self.trust_registry,
+            tool_registry=self.tools,
+            blackboard=self.blackboard,
+            gossip=self.gossip,
+        )
+        self._bot_dispatcher = BotDispatcher(
+            tool_executor=self._raw_execute_tool,
+            blackboard=self.blackboard,
+            gossip=self.gossip,
+            guard=self._guard,
+            tool_registry=self.tools,
+        )
+
         self.worker_pool = WorkerPool(
             queue=self.queue,
             blackboard=self.blackboard,
@@ -68,8 +88,8 @@ class Orchestrator:
             tool_executor=self._execute_tool,
         )
 
-    async def _execute_tool(self, tool_name: str, params: dict) -> dict:
-        """Tool executor passed to worker pool."""
+    async def _raw_execute_tool(self, tool_name: str, params: dict) -> dict:
+        """Low-level tool execution (called by bots after the Guard gate)."""
         result = self.tools.execute(tool_name, **params)
         return {
             "success": result.success,
@@ -77,6 +97,17 @@ class Orchestrator:
             "data": result.data,
             "error": result.error,
             "duration_ms": result.duration_ms,
+        }
+
+    async def _execute_tool(self, tool_name: str, params: dict) -> dict:
+        """Executor passed to the worker pool — routes through the bot swarm so
+        the Guard gate applies. Builds a lightweight task wrapper."""
+        from nano_swarm.task_queue import Task
+        task = Task(id=f"x_{tool_name}", tool_name=tool_name, params=params)
+        res = await self._bot_dispatcher.dispatch(task)
+        return {
+            "success": res.success, "output": res.output,
+            "data": res.data, "error": res.error, "duration_ms": res.duration_ms,
         }
 
     async def run(self, request: str, allow_destructive: bool = False) -> OrchestratorResult:
@@ -132,6 +163,12 @@ class Orchestrator:
             return result
 
         # Step 5: Nano-Bot Dispatch
+        # The orchestrator has already cleared scope+trust (steps 3-4); align the
+        # in-dispatch Guard so it doesn't re-block approved work.
+        if allow_destructive:
+            self._guard.allow_destructive = True
+            self.scope_enforcer.escalate(
+                ScopeLevel.PRIVILEGED, "orchestrator allow_destructive run")
         await self.worker_pool.start()
         task_map = {}
         for st in subtasks:
@@ -170,10 +207,33 @@ class Orchestrator:
             else:
                 result.tasks_failed += 1
 
-        # Step 6: Result Synthesis
-        result.answer = self._synthesize(request, result.steps, intent)
+        # Step 6: Result Synthesis (LLM-backed, template fallback)
+        result.answer = await self._synthesize_llm(request, result.steps, intent)
         result.elapsed_sec = time.time() - t0
         return result
+
+    async def _synthesize_llm(self, request: str, steps: List[dict],
+                              intent: Intent) -> str:
+        """Synthesize a natural 'Sir, ...' answer using the brain router. Falls
+        back to the deterministic template if no model backend is reachable."""
+        if not steps:
+            return "Sir, I couldn't gather any information on that."
+        facts = "\n".join(
+            f"- {s['tool']}: {str(s.get('result', {}).get('output', ''))[:300]}"
+            for s in steps)
+        try:
+            if self.brain_router is None:
+                from brain_router import BrainRouter
+                self.brain_router = BrainRouter()
+            system = ("You are Jarvis, addressing the user as Sir. Summarize the "
+                      "tool findings into a concise, professional answer. Be direct.")
+            prompt = f"Request: {request}\n\nTool findings:\n{facts}\n\nAnswer:"
+            resp = await self.brain_router.execute(prompt, system_prompt=system)
+            if resp and resp.content.strip():
+                return resp.content.strip()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("LLM synthesis failed, using template: %s", exc)
+        return self._synthesize(request, steps, intent)
 
     def _synthesize(self, request: str, steps: List[dict], intent: Intent) -> str:
         """Generate a professional 'Sir, ...' answer from step results."""
