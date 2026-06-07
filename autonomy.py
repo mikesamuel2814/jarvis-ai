@@ -30,6 +30,9 @@ def should_auto_execute(action: str, context: str = "") -> tuple[bool, str]:
     """
     Decide whether to auto-execute an action without approval.
 
+    Delegates to the v3 Scope+Trust unified decision engine (autonomy_v3)
+    while preserving the legacy API contract.
+
     Returns:
         (should_auto_execute: bool, reason: str)
 
@@ -40,10 +43,10 @@ def should_auto_execute(action: str, context: str = "") -> tuple[bool, str]:
         ...     notify_telegram(f"⚡ Auto-executed: {reason}")
     """
     try:
-        from skillset import get_autonomy_decision
-        return get_autonomy_decision(action)
-    except ImportError:
-        log.warning("skillset module not available, using defaults")
+        import autonomy_v3
+        return autonomy_v3.should_auto_execute(action, context)
+    except Exception as exc:
+        log.warning("autonomy_v3 unavailable (%s), using defaults", exc)
         # Fallback: pre-approved list
         if action in ["restart_gateway", "restart_starline", "nginx_status", "pm2_status"]:
             return True, f"Pre-approved action (default): {action}"
@@ -55,11 +58,18 @@ def should_auto_execute(action: str, context: str = "") -> tuple[bool, str]:
 def record_approval(action: str) -> None:
     """Record that Mike approved an action. Feeds learning loop."""
     try:
-        from skillset import record_approval as sk_record
-        sk_record(action)
-        log.info(f"Approval recorded: {action}")
-    except ImportError:
-        log.debug("skillset not available for recording approval")
+        import autonomy_v3
+        autonomy_v3.record_approval(action)
+        log.info("Approval recorded: %s", action)
+    except Exception as exc:
+        log.debug("autonomy_v3 record_approval failed: %s", exc)
+        # Legacy fallback
+        try:
+            from skillset import record_approval as sk_record
+            sk_record(action)
+            log.info("Approval recorded (legacy): %s", action)
+        except ImportError:
+            log.debug("skillset not available for recording approval")
 
 
 def suggest_next_action(last_action: str, outputs: dict) -> str | None:

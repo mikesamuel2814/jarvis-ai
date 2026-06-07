@@ -162,6 +162,23 @@ async def cache_request_body(request: Request, call_next):
     return await call_next(request)
 
 
+# ── Autonomy Gate ───────────────────────────────────────────────────
+
+def _check_autonomy(action_name: str, approved: bool = False) -> tuple[bool, str]:
+    """
+    Check if an action is allowed to auto-execute.
+    Returns (allowed, reason).
+    """
+    if approved:
+        return True, "explicitly approved"
+    try:
+        from autonomy import should_auto_execute
+        return should_auto_execute(action_name)
+    except Exception as exc:
+        log.warning("Autonomy check failed for %s: %s", action_name, exc)
+        return False, f"autonomy unavailable: {exc}"
+
+
 # ── Request Models ──────────────────────────────────────────────────
 
 class OrchestrateRequest(BaseModel):
@@ -170,8 +187,9 @@ class OrchestrateRequest(BaseModel):
 
 
 class ToolExecuteRequest(BaseModel):
-    tool: str
+    tool: str = ""
     params: dict = {}
+    approved: bool = False
 
 
 class RouteRequest(BaseModel):
@@ -226,6 +244,21 @@ def action_post(payload: dict = {}, x_api_key: str = Header(default=None)):
     action_name = payload.get("action", "")
     arg = payload.get("arg", "")
     approved = payload.get("approved", False)
+
+    # Autonomy gate: require approval for R2+ actions unless pre-approved/trusted
+    auto_ok, auto_reason = _check_autonomy(action_name, approved=approved)
+    if not auto_ok:
+        import uuid
+        return {
+            "success": False,
+            "output": f"⛔ {auto_reason}",
+            "action": action_name,
+            "tier": "R2+",
+            "needs_approval": True,
+            "request_id": str(uuid.uuid4())[:12],
+            "status": "pending",
+        }
+
     result = run_action(action_name, arg=arg, approved=approved)
     # Add request_id for pending approvals
     if result.get("needs_approval"):
@@ -268,6 +301,20 @@ def get_tool(tool_name: str, x_api_key: str = Header(default=None)):
 @app.post("/v3/tools/{tool_name}/execute")
 def execute_tool(tool_name: str, req: ToolExecuteRequest, x_api_key: str = Header(default=None)):
     require_api_key(x_api_key)
+
+    # Autonomy gate: require approval for R2+ tools unless pre-approved/trusted
+    auto_ok, auto_reason = _check_autonomy(tool_name, approved=req.approved)
+    if not auto_ok:
+        import uuid
+        return {
+            "success": False,
+            "output": f"⛔ {auto_reason}",
+            "tool": tool_name,
+            "needs_approval": True,
+            "request_id": str(uuid.uuid4())[:12],
+            "status": "pending",
+        }
+
     reg = get_tool_registry()
     result = reg.execute(tool_name, **req.params)
     return {
